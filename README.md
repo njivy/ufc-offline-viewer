@@ -65,3 +65,18 @@ https://github.com/njivy/ufc-offline-viewer
 ## Out of scope (by design)
 
 No backend, no CORS proxy, no local field scripts, no binary desktop app, no editing/CCR inside this app.
+
+## Static hosting (no build required)
+
+A prebuilt **`dist/`** folder is committed to this repo. Point any static host (IIS, nginx, GitHub Pages, S3, a fileshare) at `dist/`, or open via a simple static server:
+
+```bash
+npx --yes serve dist
+```
+
+Then import `dist/fixtures/ufc-1-200-01-content.json` (or your CIM export JSON/ZIP).
+
+> Asset paths are relative (`base: './'`), so serving the `dist` directory itself works even under a subpath.
+
+To regenerate after source changes: `npm i && npm run build` (updates `dist/`).
+
