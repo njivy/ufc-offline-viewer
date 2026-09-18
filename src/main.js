@@ -132,6 +132,14 @@ function bindLibrary() {
 
   document.getElementById('btn-fixture')?.addEventListener('click', async () => {
     try {
+      if (location.protocol === 'file:') {
+        setStatus(
+          'Opened from disk (file://): browsers block fetching the sample fixture. Use “Choose .json or .zip” and pick fixtures/ufc-1-200-01-content.json next to this HTML (or any CIM export).',
+          true
+        );
+        renderLibrary();
+        return;
+      }
       setStatus('Importing fixture…');
       renderLibrary();
       const rec = await importFromUrl(FIXTURE, 'fixture: ufc-1-200-01-content.json');

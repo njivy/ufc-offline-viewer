@@ -66,6 +66,22 @@ https://github.com/njivy/ufc-offline-viewer
 
 No backend, no CORS proxy, no local field scripts, no binary desktop app, no editing/CCR inside this app.
 
+
+## Open from disk (no web host)
+
+You do **not** need a remote host or `npm` on the field laptop.
+
+1. Download the release zip (or use `dist/` from this repo).
+2. Either:
+   - **Best:** double-click `ufc-offline-viewer.html` (single file; all JS/CSS inlined), or
+   - Keep the `dist/` folder together and open `dist/index.html`.
+3. Use **Choose .json or .zip** to import. Browsers block `fetch()` of local sample files under `file://`, so the “Import sample fixture” button will tell you to pick `fixtures/ufc-1-200-01-content.json` manually.
+
+IndexedDB stores imports in that browser profile. Clearing site data for `file://` removes the library.
+
+A tiny local static server (`npx serve dist`) still works if you prefer `http://localhost`.
+
+
 ## Static hosting (no build required)
 
 A prebuilt **`dist/`** folder is committed to this repo. Point any static host (IIS, nginx, GitHub Pages, S3, a fileshare) at `dist/`, or open via a simple static server:

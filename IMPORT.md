@@ -44,3 +44,6 @@ The public API currently allowlists `Origin: https://digital.wbdg.org` only. Fro
 ## Live writes
 
 Use **Open on live site** → `https://digital.wbdg.org/versions/{versionId}` (login / CCR there). This offline viewer does not write to CIM.
+
+### file:// / double-click
+Open `ufc-offline-viewer.html` (or `index.html` with its `assets/` folder). Import JSON/ZIP via the file picker — do not rely on the sample-fixture button under `file://`.
