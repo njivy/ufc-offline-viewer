@@ -10,11 +10,11 @@ var e=Object.create,t=Object.defineProperty,n=Object.getOwnPropertyDescriptor,r=
           <button type="button" data-open="${O(e.versionId)}">Open</button>
           <button type="button" class="secondary" data-delete="${O(e.versionId)}">Remove</button>
         </td>
-      </tr>`).join(``):`<tr><td colspan="6" class="empty">No documents yet. Import a JSON or ZIP, or load the sample fixture.</td></tr>`;R.innerHTML=`
+      </tr>`).join(``):`<tr><td colspan="6" class="empty">Library is empty. Import a JSON/ZIP export, or click “Import sample fixture”.</td></tr>`;R.innerHTML=`
     ${H()}
     <header class="top">
       <h1>UFC Offline Viewer</h1>
-      <p class="lede">Import CIM JSON / JSON.zip into IndexedDB, then read fully offline. Mode B API sync is stubbed (CORS usually blocks non–digital.wbdg.org origins).</p>
+      <p class="lede">Import public CIM JSON or JSON.zip into this browser’s IndexedDB, then read fully offline. API sync is optional and often blocked by CORS outside digital.wbdg.org.</p>
     </header>
 
     <section class="panel">

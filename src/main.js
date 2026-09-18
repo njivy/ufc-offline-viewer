@@ -48,13 +48,13 @@ function renderLibrary() {
       </tr>`
         )
         .join('')
-    : `<tr><td colspan="6" class="empty">No documents yet. Import a JSON or ZIP, or load the sample fixture.</td></tr>`;
+    : `<tr><td colspan="6" class="empty">Library is empty. Import a JSON/ZIP export, or click “Import sample fixture”.</td></tr>`;
 
   app.innerHTML = `
     ${banner()}
     <header class="top">
       <h1>UFC Offline Viewer</h1>
-      <p class="lede">Import CIM JSON / JSON.zip into IndexedDB, then read fully offline. Mode B API sync is stubbed (CORS usually blocks non–digital.wbdg.org origins).</p>
+      <p class="lede">Import public CIM JSON or JSON.zip into this browser’s IndexedDB, then read fully offline. API sync is optional and often blocked by CORS outside digital.wbdg.org.</p>
     </header>
 
     <section class="panel">
