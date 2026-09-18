@@ -72,7 +72,7 @@ Offline-only notes tagged to sections or sentences. They live in IndexedDB and *
 4. **Export notes JSON** / **Import notes…** in the notes panel — versioned format `ufc-offline-notes` v1; choose **merge** or **replace**.
 5. Reload the page, re-open the document — notes persist locally.
 
-Formal CCR / writes: **Open on live site** only. Plan: [docs/CCR-PLAN.md](./docs/CCR-PLAN.md) (do not re-implement CCR in-app until approved).
+Formal CCR / writes: **Open on live site** only. Plan: [docs/CCR-PLAN.md](./docs/CCR-PLAN.md) (approved: link-out only; no in-app CCR).
 
 ## Online directory & asOf sync (v0.4)
 

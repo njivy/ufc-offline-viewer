@@ -1,7 +1,7 @@
 # CCR plan for UFC Offline Viewer (link-out only)
 
 **Date:** 2026-09-18 (PT)  
-**Status:** Proposal — **do not re-implement CCR in the offline app until Nic approves this plan.**  
+**Status:** Approved by Nic (2026-09-18) — link-out only; do not re-add in-app CCR, guest POST, or /ccr hub buttons.  
 **Sources:** Public OpenAPI (`POST /v1/ccrs/guest`, CreateGuestCcrDto / CcrDto), llms.txt, api-probe.md, CORS findings. SPA is JS-rendered; no HTML scrape.
 
 ---
@@ -51,6 +51,6 @@ See also [CORS-ALLOWLIST-ASK.md](./CORS-ALLOWLIST-ASK.md) (read allowlist ask on
 
 ## Explicit non-goal
 
-**Do not re-implement CCR** (forms, guest POST, status tracking) inside UFC Offline Viewer until Nic reviews and approves this plan (or a successor).
+**Do not re-implement CCR** (forms, guest POST, status tracking) inside UFC Offline Viewer ; Nic approved link-out only (2026-09-18). Successor needed only if product direction changes.
 
 Also recorded under `/workspace/ufc-offline-feasibility/CCR-PLAN.md`.
