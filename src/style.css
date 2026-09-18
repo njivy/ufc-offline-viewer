@@ -1195,3 +1195,59 @@ label.secondary-file {
   margin-bottom: 0;
 }
 
+
+
+/* Applicable project */
+.project-bar {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0.85rem 1.05rem 0.95rem;
+  margin-bottom: 1rem;
+}
+.project-bar-compact {
+  padding: 0.55rem 0.85rem 0.65rem;
+  margin-bottom: 0.75rem;
+}
+.project-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.project-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.project-input {
+  flex: 1 1 14rem;
+  min-width: 12rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+.project-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent, #2f6fed) 45%, transparent);
+  border-color: var(--accent, #2f6fed);
+}
+.project-current {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+.project-name {
+  color: var(--ink);
+}
+.project-unset {
+  font-style: italic;
+}
+
+/* Soften leftover advanced styles if any */
+.advanced-disclosure { display: none; }

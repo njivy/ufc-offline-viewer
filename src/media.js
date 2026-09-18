@@ -1,10 +1,9 @@
 /**
  * Offline IMAGE media: walk content tree, IndexedDB blobs, blob:/object URLs.
- * Never hot-link api.digital.wbdg.org when offline.
+ * Images come from media packs / IndexedDB only — no live storage API fetch.
  */
 
 import { openDb, txDone } from './db.js';
-import { API_BASE } from './api.js';
 import JSZip from 'jszip';
 
 export const MEDIA_STORE = 'media';
@@ -32,20 +31,6 @@ export function normalizeMediaPath(urlOrPath) {
     /* keep raw */
   }
   return p.replace(/^\/+/, '');
-}
-
-/** Encode path segments for GET /v1/storage/files/{path} */
-export function encodeStoragePath(path) {
-  return normalizeMediaPath(path)
-    .split('/')
-    .filter(Boolean)
-    .map((seg) => encodeURIComponent(seg))
-    .join('/');
-}
-
-export function storageFileUrl(path) {
-  const enc = encodeStoragePath(path);
-  return `${API_BASE}/v1/storage/files/${enc}`;
 }
 
 /**
@@ -146,99 +131,6 @@ export async function deleteMediaForVersion(versionId) {
   await txDone(tx);
   db.close();
   return existing.length;
-}
-
-/**
- * Fetch one image from storage API (CORS may fail outside digital.wbdg.org).
- */
-export async function tryFetchStorageFile(path) {
-  const url = storageFileUrl(path);
-  try {
-    const res = await fetch(url, { method: 'GET', mode: 'cors' });
-    if (!res.ok) {
-      return {
-        ok: false,
-        corsLikely: false,
-        message: `Storage HTTP ${res.status} for ${path}`,
-        url,
-        path,
-      };
-    }
-    const blob = await res.blob();
-    return {
-      ok: true,
-      blob,
-      contentType: res.headers.get('content-type') || blob.type,
-      url,
-      path: normalizeMediaPath(path),
-    };
-  } catch (err) {
-    const msg = err?.message || String(err);
-    const corsLikely =
-      /Failed to fetch|NetworkError|CORS|cross-origin|Load failed/i.test(msg) ||
-      err?.name === 'TypeError';
-    return {
-      ok: false,
-      corsLikely,
-      message: corsLikely
-        ? `CORS blocked image fetch (${path}). Import a media pack (ZIP with media/…) instead.`
-        : `Image fetch failed: ${msg}`,
-      url,
-      path,
-      error: msg,
-    };
-  }
-}
-
-/**
- * Download and store all IMAGE assets for a version.
- * @param {string} versionId
- * @param {Array} sections
- * @param {{ onProgress?: (done:number, total:number, path:string) => void, skipExisting?: boolean }} opts
- */
-export async function syncImagesForContent(versionId, sections, opts = {}) {
-  const assets = collectImageAssets(sections);
-  const total = assets.length;
-  let saved = 0;
-  let skipped = 0;
-  let failed = 0;
-  const errors = [];
-  let corsBlocked = false;
-
-  for (let i = 0; i < assets.length; i++) {
-    const { path } = assets[i];
-    opts.onProgress?.(i, total, path);
-    if (opts.skipExisting) {
-      const existing = await getMediaRecord(versionId, path);
-      if (existing?.blob) {
-        skipped += 1;
-        continue;
-      }
-    }
-    const result = await tryFetchStorageFile(path);
-    if (result.ok) {
-      await putMediaBlob(versionId, path, result.blob, {
-        contentType: result.contentType,
-        source: 'api-storage',
-      });
-      saved += 1;
-    } else {
-      failed += 1;
-      if (result.corsLikely) corsBlocked = true;
-      errors.push({ path, message: result.message });
-    }
-  }
-  opts.onProgress?.(total, total, '');
-
-  return {
-    total,
-    saved,
-    skipped,
-    failed,
-    corsBlocked,
-    errors,
-    assets,
-  };
 }
 
 /**

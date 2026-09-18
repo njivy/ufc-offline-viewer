@@ -1,12 +1,13 @@
 # UFC Offline Viewer
 
-Static browser app for **offline reading** of Unified Facilities Criteria (UFC) content exported from [digital.wbdg.org](https://digital.wbdg.org) / the public CIM API.
+Static browser app for **offline reading** of Unified Facilities Criteria (UFC) content exported from [digital.wbdg.org](https://digital.wbdg.org).
 
-**Offline snapshot · not live CIM**
+**Offline snapshot · import / packs only · not live CIM**
 
-- **Mode A (primary):** Import `.json` or `.zip` (containing JSON) → IndexedDB → fully offline read.
-- **Mode B (stub):** Try `fetch` to `https://api.digital.wbdg.org`; on CORS failure, show Import guidance. **No proxy.**
-- **Writes:** “Open on live site” only (link-out). Formal CCR stays on digital.wbdg.org — see [docs/CCR-PLAN.md](./docs/CCR-PLAN.md). Local notes stay in IndexedDB and never sync.
+- **Import (primary):** `.json` or `.zip` (content + optional `media/`) → IndexedDB → fully offline read.
+- **No live API fetch:** This app does **not** call `api.digital.wbdg.org` (WBDG will not relax CORS). Content and images come only from local import / media packs / bundled static assets.
+- **Writes:** “Open on live site” only (href navigation). Formal CCR stays on digital.wbdg.org — see [docs/CCR-PLAN.md](./docs/CCR-PLAN.md). Local notes stay in IndexedDB and never sync.
+- **Applicable project:** User-editable project name, persisted in `localStorage`, shown on library and reader; included in notes export metadata.
 
 ## Quick start
 
@@ -40,7 +41,7 @@ In the app:
 2. Open **Samples** → **Import sample fixture (UFC 1-200-01)** / image demo pack, or
 3. Drag-drop `public/fixtures/ufc-1-200-01-content.json` from disk onto the drop zone.
 
-**Library** is listed above Import so newly imported docs stay visible. Online directory / API sync live under **Advanced** (collapsed by default).
+**Library** is listed above Import so newly imported docs stay visible. **Samples** (collapsed) holds fixtures and an optional **cached catalog** (bundled static JSON only — not a live API).
 
 See [IMPORT.md](./IMPORT.md) for export sources and zip notes.
 
@@ -50,19 +51,24 @@ See [IMPORT.md](./IMPORT.md) for export sources and zip notes.
 2. Import the fixture (or any content JSON).
 3. Open DevTools → Application → IndexedDB → `ufc-offline` → `docs` (keyed by `versionId`).
 4. Open the document → TOC, body text, tables, in-document search.
-5. Turn off network (DevTools Offline) → refresh may need a service worker for the *app shell*; **document data** is already in IndexedDB. Re-open the library after load and open the doc again while offline.
-6. “Open on live site” should point at `https://digital.wbdg.org/versions/a093a449-9220-45e0-866a-67d3139af067` for the sample.
-7. “Try sync” from localhost should show the CORS / Import guidance message (expected).
+5. Turn off network (DevTools Offline) → **document data** is already in IndexedDB. Re-open the library after load and open the doc again while offline.
+6. “Open on live site” should point at `https://digital.wbdg.org/versions/…` for the sample (href only — no API).
+7. There is **no** “Try sync” / live CIM fetch in this app.
 
 ## Stack
 
 - Vite + vanilla JS
 - JSZip (zip imports)
 - IndexedDB database `ufc-offline` (v3): store `docs` (key `versionId`) + `notes` (local commentary) + `media` (IMAGE blobs keyed by versionId + path)
+- `localStorage` key `ufc-offline-applicable-project` for Applicable project
 
 ## Repo
 
 https://github.com/njivy/ufc-offline-viewer
+
+## Applicable project (v0.7+)
+
+Set a project name anytime in the **Applicable project** field (library home and reader). It persists in this browser and appears in notes export metadata as `applicableProject`.
 
 ## Local commentary (v0.3+)
 
@@ -78,35 +84,30 @@ Formal CCR / writes: **Open on live site** only. Plan: [docs/CCR-PLAN.md](./docs
 
 ## Offline images (v0.5+)
 
-**Pack import always works** (ZIP with `media/` → IndexedDB blobs). **Live** `GET /v1/storage/files/{path}` (Fetch images / include-images sync) only succeeds when the API CORS-allowlists this origin (e.g. `https://digital.wbdg.org`). Off allowlist you get a clear CORS error and guidance to import a media pack — never a silent fail.
-
+**Pack import always works** (ZIP with `media/` → IndexedDB blobs). Live storage GETs were removed in **v0.7** — import a media pack instead.
 
 UFC content references figures via `mediaAsset` (`type: IMAGE`, relative `url` / `sourcePath` like `ces/…/images/foo.png`). Tables stay inline HTML; images are separate binaries.
 
-1. Import a **media pack** ZIP (`content.json` + `media/…`) or sync with **Include images** when CORS allows storage GETs.
-2. Open the document — figures hydrate from IndexedDB as `blob:` URLs (never hot-linked offline).
+1. Import a **media pack** ZIP (`content.json` + `media/…`).
+2. Open the document — figures hydrate from IndexedDB as `blob:` URLs (never hot-linked).
 3. Missing files show **Image not in pack** plus the storage path.
-4. Reader actions: **Fetch images**, **Import media pack…**, **Export pack** (JSON + media for air-gap).
+4. Reader actions: **Import media pack…**, **Export pack** (JSON + media for air-gap), **Open on live site**.
 
 Try: import `public/fixtures/image-demo-pack.zip` — one figure renders, one intentionally missing. UFC 1-200-01 sample still has **0 IMAGES**.
 
-## Online directory & asOf sync (v0.4)
+## Cached catalog (static only)
 
-1. On the library page, set **As of** (YYYY-MM-DD) → **Load directory**.
-2. Prefer live `GET /v1/snapshots/resolve?asOf=` (falls back to `GET /v1/ces/published`, then bundled `catalog/preliminary-directory.json`).
-3. If CORS blocks the API, the UI explains why and still shows the cached directory; use **Import** for content.
-4. Pick a row → **Sync** (tries content pull) or **Use id** + **Try sync version**.
+Under **Samples** → **Show cached catalog**, the app loads bundled `public/catalog/preliminary-directory.json` (may be stale). Rows link out to the live site (href only). There is no API directory sync and no content pull from this list.
 
-## TOC & metadata (v0.3)
+## TOC & metadata (v0.3+)
 
 - Polished left Contents nav with depth rail, chapter weight, and scrollspy active state
-- Compact **Details** disclosure for document metadata/provenance (both reader modes)
-- Library-first home chrome; Samples + Advanced disclosures; reader **Advanced** for Fetch images / Import media pack (Open on live site + Export pack stay primary)
+- Compact **Details** disclosure for document metadata/provenance
+- Library-first home chrome; Samples disclosure; reader keeps Open on live site + Export pack + Import media pack
 
 ## Out of scope (by design)
 
-No backend, no CORS proxy, no local field scripts, no binary desktop app, no CIM/CCR writes inside this app (local notes only; link-out for formal CCR).
-
+No backend, no CORS proxy, no live CIM/API fetch from this app, no local field scripts, no binary desktop app, no CIM/CCR writes inside this app (local notes only; link-out for formal CCR).
 
 ## Open from disk (no web host)
 
@@ -122,7 +123,6 @@ IndexedDB stores imports in that browser profile. Clearing site data for `file:/
 
 A tiny local static server (`npx serve dist`) still works if you prefer `http://localhost`.
 
-
 ## Static hosting (no build required)
 
 A prebuilt **`dist/`** folder is committed to this repo. Point any static host (IIS, nginx, GitHub Pages, S3, a fileshare) at `dist/`, or open via a simple static server:
@@ -137,7 +137,7 @@ Then import `dist/fixtures/ufc-1-200-01-content.json` (or your CIM export JSON/Z
 
 To regenerate after source changes: `npm i && npm run build` (updates `dist/`).
 
-## Requirements table (v0.2)
+## Requirements table (v0.2+)
 
 Open a document, then switch **Document | Requirements table**.
 
@@ -146,4 +146,3 @@ Open a document, then switch **Document | Requirements table**.
 - Filter by keyword or type; export **CSV** for project review spreadsheets
 - Document metadata strip shows designation status / current / row count
 - CIM `metadataFields` will appear when present on an import (the sample UFC 1-200-01 export has an empty list)
-

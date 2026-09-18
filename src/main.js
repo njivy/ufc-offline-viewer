@@ -1,5 +1,5 @@
 import './style.css';
-import { listDocs, getDoc, deleteDoc, saveDoc } from './db.js';
+import { listDocs, getDoc, deleteDoc } from './db.js';
 import { importFile, importFromUrl, importMediaPackFile } from './import.js';
 import {
   walkToc,
@@ -10,7 +10,7 @@ import {
   requirementsToCsv,
   renderDocMetaPanel,
 } from './render.js';
-import { trySyncFromApi, liveVersionUrl, loadPreliminaryDirectory, loadCachedDirectory } from './api.js';
+import { liveVersionUrl, loadCachedDirectory } from './api.js';
 import {
   listNotesForVersion,
   countNotesByTarget,
@@ -21,7 +21,6 @@ import {
 } from './notes.js';
 import {
   collectImageAssets,
-  syncImagesForContent,
   hydrateDocumentImages,
   buildMediaPackZip,
   deleteMediaForVersion,
@@ -30,11 +29,30 @@ import {
   revokeObjectUrlsForVersion,
 } from './media.js';
 
-const FIXTURE = '/fixtures/ufc-1-200-01-content.json';
-const IMAGE_DEMO_PACK = './fixtures/image-demo-pack.zip';
-const SAMPLE_VERSION_ID = 'a093a449-9220-45e0-866a-67d3139af067';
-
+const FIXTURE = './fixtures/ufc-1-200-01-content.json'
+const IMAGE_DEMO_PACK = './fixtures/image-demo-pack.zip'
 const app = document.querySelector('#app');
+const PROJECT_KEY = 'ufc-offline-applicable-project';
+
+function loadApplicableProject() {
+  try {
+    return localStorage.getItem(PROJECT_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveApplicableProject(value) {
+  const v = String(value || '').trim();
+  try {
+    if (v) localStorage.setItem(PROJECT_KEY, v);
+    else localStorage.removeItem(PROJECT_KEY);
+  } catch {
+    /* ignore quota / private mode */
+  }
+  return v;
+}
+
 let state = {
   view: 'library', // library | reader
   docs: [],
@@ -49,15 +67,13 @@ let state = {
   noteCounts: {},
   noteDraft: null, // { targetType, targetId, noteId?, body }
   notesPanelOpen: true,
-  directory: null, // { ok, items, label, stale, source, asOf, liveError? }
+  directory: null, // cached static catalog only
   directoryFilter: '',
-  syncAsOf: '',
-  includeImages: true, // sync/import: fetch or pack-include IMAGE blobs
   mediaStats: null, // { total, local } for current doc
   samplesOpen: false,
-  advancedOpen: false, // Online directory & sync (library)
+  catalogOpen: false, // Samples → show cached catalog
   metaDetailsOpen: false, // reader Details disclosure
-  readerAdvancedOpen: false, // Fetch images / Import media pack
+  applicableProject: loadApplicableProject(),
 };
 
 let tocObserver = null;
@@ -96,18 +112,63 @@ function setStatus(msg, isError = false) {
 }
 
 function banner() {
-  return `<div class="banner" role="status">Offline snapshot · not live CIM</div>`;
+  return `<div class="banner" role="status">Offline snapshot · import / packs only · not live CIM</div>`;
+}
+
+function projectBar(opts = {}) {
+  const compact = !!opts.compact;
+  const project = state.applicableProject || '';
+  const display = project
+    ? `<strong class="project-name">${escapeHtml(project)}</strong>`
+    : `<span class="project-unset muted">Not set</span>`;
+  return `
+    <section class="project-bar ${compact ? 'project-bar-compact' : ''}" aria-label="Applicable project">
+      <label class="project-label" for="applicable-project">Applicable project</label>
+      <div class="project-row">
+        <input
+          type="text"
+          id="applicable-project"
+          class="project-input"
+          placeholder="e.g. Hangar renovation — Base X"
+          value="${escapeHtml(project)}"
+          autocomplete="off"
+          spellcheck="true"
+        />
+        <button type="button" class="secondary" id="btn-save-project">Save</button>
+      </div>
+      <p class="project-current hint">Current: ${display} · stored in this browser only</p>
+    </section>`;
+}
+
+function bindProjectBar(rerender) {
+  const input = document.getElementById('applicable-project');
+  const save = () => {
+    state.applicableProject = saveApplicableProject(input?.value || '');
+    setStatus(
+      state.applicableProject
+        ? `Applicable project set to “${state.applicableProject}”`
+        : 'Applicable project cleared'
+    );
+    rerender();
+  };
+  document.getElementById('btn-save-project')?.addEventListener('click', save);
+  input?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      save();
+    }
+  });
 }
 
 function renderDirectoryBlock() {
   const dir = state.directory;
   if (!dir) {
-    return `<p class="hint dir-empty">No directory loaded yet. Choose an as-of date and click <strong>Load directory</strong>, or show the cached public list.</p>`;
+    return `<p class="hint dir-empty">No cached catalog loaded. Click <strong>Show cached catalog</strong> under Samples (local static asset only — not a live API).</p>`;
   }
   if (!dir.ok) {
     return `<div class="dir-banner error">
-      <p><strong>Could not load live directory.</strong> ${escapeHtml(dir.message || 'Unknown error')}</p>
-      <p class="hint">The public API only allowlists <code>https://digital.wbdg.org</code> for browser CORS. Mode A <strong>Import</strong> still works — download a JSON/ZIP export elsewhere and import it above.</p>
+      <p><strong>Could not load cached catalog.</strong> ${escapeHtml(dir.message || 'Unknown error')}</p>
+      <p class="hint">Import a JSON/ZIP pack above to add documents to your library.</p>
     </div>`;
   }
   const q = (state.directoryFilter || '').trim().toLowerCase();
@@ -120,41 +181,32 @@ function renderDirectoryBlock() {
         .includes(q)
     );
   }
-  const staleNote = dir.stale
-    ? `<span class="pill warn">cached — may be stale</span>`
-    : `<span class="pill ok-pill">${escapeHtml(dir.source || 'live')}</span>`;
-  const corsNote =
-    dir.liveError && dir.liveError.corsLikely
-      ? `<p class="hint">Live API was blocked by CORS; showing ${dir.stale ? 'cached' : 'fallback'} directory. Content sync will likely fail too — prefer Import.</p>`
-      : '';
   const rows = items.length
     ? items
         .map((i) => {
           const inLib = state.docs.some((d) => d.versionId === i.versionId);
+          const live = liveVersionUrl(i.versionId);
           return `<tr>
             <td><strong>${escapeHtml(i.designation)}</strong></td>
             <td>${escapeHtml(i.title)}</td>
             <td>${escapeHtml(i.versionNumber || '—')}</td>
-            <td class="mono">${escapeHtml((i.versionId || '').slice(0, 8))}…</td>
             <td class="actions">
-              ${inLib ? '<span class="muted">In library</span>' : ''}
-              <button type="button" data-dir-sync="${escapeHtml(i.versionId)}" title="Try API sync">Sync</button>
-              <button type="button" class="secondary" data-dir-fill="${escapeHtml(i.versionId)}">Use id</button>
+              ${inLib ? '<span class="muted">In library</span>' : '<span class="muted">Import pack to read offline</span>'}
+              <a class="link-btn" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
             </td>
           </tr>`;
         })
         .join('')
-    : `<tr><td colspan="5" class="empty">No documents match this filter.</td></tr>`;
+    : `<tr><td colspan="4" class="empty">No documents match this filter.</td></tr>`;
   return `
     <div class="dir-banner">
       <div class="dir-banner-head">
-        <strong>${escapeHtml(dir.label || 'Directory')}</strong>
-        ${staleNote}
+        <strong>${escapeHtml(dir.label || 'Cached catalog')}</strong>
+        <span class="pill warn">local asset — may be stale</span>
         <span class="muted">${items.length} / ${(dir.items || []).length} shown</span>
       </div>
-      ${corsNote}
       <div class="sync-row" style="margin-top:0.5rem">
-        <input type="search" id="dir-filter" placeholder="Filter directory…" value="${escapeHtml(state.directoryFilter || '')}" />
+        <input type="search" id="dir-filter" placeholder="Filter catalog…" value="${escapeHtml(state.directoryFilter || '')}" />
       </div>
       <div class="table-scroll dir-table-wrap">
         <table class="lib dir-table">
@@ -163,7 +215,6 @@ function renderDirectoryBlock() {
               <th>Designation</th>
               <th>Title</th>
               <th>Version</th>
-              <th>versionId</th>
               <th></th>
             </tr>
           </thead>
@@ -194,15 +245,16 @@ function renderLibrary() {
     : `<tr><td colspan="6" class="empty">Library is empty. Use <strong>Import pack</strong> below, or open <strong>Samples</strong>.</td></tr>`;
 
   const samplesOpen = state.samplesOpen ? ' open' : '';
-  const advancedOpen = state.advancedOpen ? ' open' : '';
+  const catalogBlock = state.catalogOpen ? renderDirectoryBlock() : '';
 
   app.innerHTML = `
     ${banner()}
     <header class="top">
       <h1>UFC Offline Viewer</h1>
-      <p class="lede">Import a UFC pack to read offline. Open the live CIM site when you need the current published version.</p>
+      <p class="lede">Import JSON or media packs to read offline. This app does not fetch live CIM content — use <strong>Open on live site</strong> when you need the current published version.</p>
     </header>
 
+    ${projectBar()}
     ${statusBlock()}
 
     <section class="panel library-panel" id="library-panel">
@@ -246,36 +298,15 @@ function renderLibrary() {
             <a class="link-btn" href="${IMAGE_DEMO_PACK}" download="image-demo-pack.zip">Download image demo pack</a>
           </div>
           <p class="hint">UFC 1-200-01 sample has 0 IMAGES — use the image demo pack to try blob URLs + “not in pack”.</p>
+          <div class="import-row" style="margin-top:0.75rem">
+            <button type="button" class="secondary" id="btn-load-cached">${state.catalogOpen ? 'Refresh cached catalog' : 'Show cached catalog'}</button>
+            ${state.catalogOpen ? '<button type="button" class="secondary" id="btn-hide-cached">Hide catalog</button>' : ''}
+          </div>
+          <p class="hint">Cached catalog is a bundled static JSON asset (may be stale). It does not call the live API — import a pack to read offline.</p>
+          ${catalogBlock}
         </div>
       </details>
     </section>
-
-    <details class="panel disclosure advanced-disclosure" id="advanced-details"${advancedOpen}>
-      <summary class="advanced-summary">
-        <span class="advanced-summary-title">Advanced</span>
-        <span class="muted">Online directory, API sync, air-gap options</span>
-      </summary>
-      <div class="disclosure-body">
-        <h3 class="disclosure-h3">Online directory &amp; sync</h3>
-        <p class="hint" style="margin-top:0">Live API works only when this origin is CORS-allowlisted (today: digital.wbdg.org). Otherwise browse the cached directory — prefer <strong>Import pack</strong> above.</p>
-        <div class="sync-row">
-          <label class="sync-asof-label" for="sync-asof">As of</label>
-          <input id="sync-asof" type="date" value="${escapeHtml(state.syncAsOf || '')}" aria-label="asOf date YYYY-MM-DD" />
-          <button type="button" id="btn-load-directory">Load directory</button>
-          <button type="button" class="secondary" id="btn-load-cached">Show cached directory</button>
-        </div>
-        ${renderDirectoryBlock()}
-        <div class="sync-row" style="margin-top:0.75rem">
-          <input id="sync-version" type="text" value="${SAMPLE_VERSION_ID}" aria-label="versionId" placeholder="versionId UUID" />
-          <button type="button" id="btn-sync">Try sync version</button>
-        </div>
-        <label class="check-row">
-          <input type="checkbox" id="chk-include-images" ${state.includeImages ? 'checked' : ''} />
-          Include images when syncing / importing packs (store blobs in IndexedDB)
-        </label>
-        <p class="hint">Sync prefers <code>GET /v1/versions/{id}/content</code> then optional storage file GETs. On CORS failure, import a JSON/ZIP pack with <code>media/</code> instead.</p>
-      </div>
-    </details>
   `;
 
   bindLibrary();
@@ -297,6 +328,8 @@ function formatDate(iso) {
 }
 
 function bindLibrary() {
+  bindProjectBar(() => renderLibrary());
+
   document.getElementById('file-input')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (file) await doImport(file);
@@ -329,7 +362,7 @@ function bindLibrary() {
     try {
       if (location.protocol === 'file:') {
         setStatus(
-          'Opened from disk (file://): use Choose .json or .zip and pick fixtures/image-demo-pack.zip.',
+          'Opened from disk (file://): use Choose .json or .zip and pick fixtures/image-demo-pack.zip',
           true
         );
         renderLibrary();
@@ -348,48 +381,25 @@ function bindLibrary() {
     }
   });
 
-  document.getElementById('btn-sync')?.addEventListener('click', async () => {
-    const vid = document.getElementById('sync-version')?.value?.trim() || SAMPLE_VERSION_ID;
-    await doSyncVersion(vid);
-  });
-
-  const asofEl = document.getElementById('sync-asof');
-  asofEl?.addEventListener('change', () => {
-    state.syncAsOf = asofEl.value || '';
-  });
-
-  document.getElementById('btn-load-directory')?.addEventListener('click', async () => {
-    const asOf = document.getElementById('sync-asof')?.value?.trim() || '';
-    state.syncAsOf = asOf;
-    if (!asOf) {
-      setStatus('Pick an as-of date (YYYY-MM-DD), or use “Show cached directory”.', true);
-      renderLibrary();
-      return;
-    }
-    setStatus(`Loading directory asOf ${asOf}…`);
-    renderLibrary();
-    const result = await loadPreliminaryDirectory(asOf);
-    state.directory = result;
-    state.directoryFilter = '';
-    if (result.ok) {
-      setStatus(`Directory: ${result.items.length} documents (${result.label})`);
-    } else {
-      setStatus(result.message || 'Directory load failed', true);
-    }
-    renderLibrary();
-  });
-
   document.getElementById('btn-load-cached')?.addEventListener('click', async () => {
-    setStatus('Loading cached public directory…');
+    setStatus('Loading cached public catalog…');
+    state.catalogOpen = true;
+    state.samplesOpen = true;
     renderLibrary();
     const result = await loadCachedDirectory();
     state.directory = result;
     state.directoryFilter = '';
     if (result.ok) {
-      setStatus(`Cached directory: ${result.items.length} documents`);
+      setStatus(`Cached catalog: ${result.items.length} documents (local asset only)`);
     } else {
-      setStatus(result.message || 'Cached directory missing', true);
+      setStatus(result.message || 'Cached catalog missing', true);
     }
+    renderLibrary();
+  });
+
+  document.getElementById('btn-hide-cached')?.addEventListener('click', () => {
+    state.catalogOpen = false;
+    setStatus('');
     renderLibrary();
   });
 
@@ -405,24 +415,6 @@ function bindLibrary() {
         again.setSelectionRange(again.value.length, again.value.length);
       }
     }, 160);
-  });
-
-  app.querySelectorAll('[data-dir-sync]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const vid = btn.getAttribute('data-dir-sync');
-      if (vid) await doSyncVersion(vid);
-    });
-  });
-
-  app.querySelectorAll('[data-dir-fill]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const vid = btn.getAttribute('data-dir-fill');
-      const input = document.getElementById('sync-version');
-      if (input && vid) {
-        input.value = vid;
-        input.focus();
-      }
-    });
   });
 
   const zone = document.getElementById('drop-zone');
@@ -482,65 +474,9 @@ function bindLibrary() {
     });
   });
 
-  document.getElementById('chk-include-images')?.addEventListener('change', (e) => {
-    state.includeImages = !!e.target.checked;
-  });
-
   document.getElementById('samples-details')?.addEventListener('toggle', (e) => {
     state.samplesOpen = e.target.open;
   });
-  document.getElementById('advanced-details')?.addEventListener('toggle', (e) => {
-    state.advancedOpen = e.target.open;
-  });
-}
-
-async function doSyncVersion(vid) {
-  setStatus(`Trying API sync for ${vid}…`);
-  renderLibrary();
-  const result = await trySyncFromApi(vid);
-  if (result.ok) {
-    try {
-      const rec = await saveDoc(result.data, 'api-sync');
-      let imgMsg = '';
-      if (state.includeImages) {
-        const sections = rec.content?.sections || [];
-        const assets = collectImageAssets(sections);
-        if (assets.length) {
-          setStatus(`Synced ${rec.designation} — fetching images 0/${assets.length}…`);
-          renderLibrary();
-          const imgResult = await syncImagesForContent(rec.versionId, sections, {
-            skipExisting: true,
-            onProgress: (done, total, path) => {
-              if (total && done < total) {
-                setStatus(
-                  `Synced ${rec.designation} — images ${done}/${total}${path ? `: ${path.split('/').pop()}` : ''}`
-                );
-                // avoid full re-render thrash: update flash only
-                const flash = app.querySelector('.flash');
-                if (flash) flash.textContent = state.status;
-              }
-            },
-          });
-          if (imgResult.corsBlocked) {
-            imgMsg = ` · live image fetch CORS-blocked (${imgResult.failed}/${imgResult.total}; allowlist e.g. digital.wbdg.org) — import a media pack instead`;
-          } else if (imgResult.failed) {
-            imgMsg = ` · images ${imgResult.saved} saved, ${imgResult.failed} failed`;
-          } else {
-            imgMsg = ` · ${imgResult.saved} image(s) stored`;
-          }
-        } else {
-          imgMsg = ' · no IMAGE assets in content';
-        }
-      }
-      await refreshLibrary();
-      setStatus(`Synced ${rec.designation} from API${imgMsg}`);
-    } catch (err) {
-      setStatus('API OK but save failed: ' + (err.message || err), true);
-    }
-  } else {
-    setStatus(result.message, true);
-  }
-  renderLibrary();
 }
 
 async function doImport(file) {
@@ -548,7 +484,7 @@ async function doImport(file) {
     setStatus(`Importing ${file.name}…`);
     renderLibrary();
     const rec = await importFile(file, {
-      includeMedia: state.includeImages,
+      includeMedia: true,
       onProgress: (msg) => {
         setStatus(msg);
         const flash = app.querySelector('.flash');
@@ -565,9 +501,7 @@ async function doImport(file) {
       const imgBit =
         ms && ms.saved
           ? ` · ${ms.saved} image(s) from pack`
-          : state.includeImages
-            ? ''
-            : '';
+          : ''
       setStatus(`Imported ${rec.designation} — ${rec.title}${imgBit}`);
     }
     renderLibrary();
@@ -583,26 +517,17 @@ function readerActionLinks(versionId) {
   const mediaHint = ms
     ? `<p class="hint media-stat-hint">Images in IndexedDB: <strong>${ms.local}</strong> / ${ms.total} referenced</p>`
     : '';
-  const advOpen = state.readerAdvancedOpen ? ' open' : '';
   return `
     <div class="live-links">
       <a class="link-btn primary" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
       <button type="button" class="secondary" id="btn-export-pack" title="JSON + media/ for air-gap">Export pack</button>
+      <label class="file-btn secondary-file">
+        Import media pack…
+        <input type="file" id="media-pack-input" accept=".zip,application/zip" hidden />
+      </label>
     </div>
-    <details class="disclosure reader-advanced" id="reader-advanced"${advOpen}>
-      <summary>Advanced — media / API</summary>
-      <div class="disclosure-body">
-        <div class="live-links">
-          <button type="button" class="secondary" id="btn-fetch-images" title="GET /v1/storage/files/… when CORS allows">Fetch images</button>
-          <label class="file-btn secondary-file">
-            Import media pack…
-            <input type="file" id="media-pack-input" accept=".zip,application/zip" hidden />
-          </label>
-        </div>
-        ${mediaHint}
-        <p class="write-hint">Writes (CCR) stay on the live CIM site — use Open on live site. Local notes never sync. Offline images use IndexedDB blob URLs.</p>
-      </div>
-    </details>`;
+    ${mediaHint}
+    <p class="write-hint">Writes (CCR) stay on the live CIM site — use Open on live site. Local notes never sync. Offline images come from imported media packs (IndexedDB blob URLs).</p>`;
 }
 
 function renderNotesPanel() {
@@ -735,6 +660,7 @@ function renderReader() {
 
   const header = `
     ${banner()}
+    ${projectBar({ compact: true })}
     <header class="top reader-top">
       <button type="button" id="btn-back" class="secondary">← Library</button>
       <div class="meta">
@@ -884,6 +810,8 @@ function renderReader() {
   disconnectTocSpy();
   app.innerHTML = `${header}${mainHtml}${renderNoteModal()}${statusBlock()}`;
 
+  bindProjectBar(() => renderReader());
+
   document.getElementById('btn-back')?.addEventListener('click', async () => {
     disconnectTocSpy();
     if (state.current?.versionId) revokeObjectUrlsForVersion(state.current.versionId);
@@ -900,9 +828,6 @@ function renderReader() {
 
   document.getElementById('meta-details')?.addEventListener('toggle', (e) => {
     state.metaDetailsOpen = e.target.open;
-  });
-  document.getElementById('reader-advanced')?.addEventListener('toggle', (e) => {
-    state.readerAdvancedOpen = e.target.open;
   });
 
     document.getElementById('btn-export-pack')?.addEventListener('click', async () => {
@@ -924,51 +849,6 @@ function renderReader() {
     renderReader();
   });
 
-  document.getElementById('btn-fetch-images')?.addEventListener('click', async () => {
-    const doc = state.current;
-    if (!doc) return;
-    const versionId = doc.versionId || doc.content?.criterion?.versionId;
-    const sections = doc.content?.sections || [];
-    const assets = collectImageAssets(sections);
-    if (!assets.length) {
-      setStatus('This document has no IMAGE mediaAssets (UFC 1-200-01 sample has none).');
-      renderReader();
-      return;
-    }
-    state.readerAdvancedOpen = true;
-    setStatus(`Fetching images 0/${assets.length} via api.digital.wbdg.org/v1/storage/files/…`);
-    renderReader();
-    const result = await syncImagesForContent(versionId, sections, {
-      skipExisting: true,
-      onProgress: (done, total, path) => {
-        if (done < total) {
-          setStatus(`Fetching images ${done}/${total}${path ? `: ${path.split('/').pop()}` : ''}`);
-          const flash = app.querySelector('.flash');
-          if (flash) flash.textContent = state.status;
-        }
-      },
-    });
-    await refreshMediaStats();
-    if (result.corsBlocked) {
-      setStatus(
-        `Live image fetch failed: CORS blocked GET /v1/storage/files/… (${result.failed}/${result.total}). ` +
-          `Storage API only allowlists origins such as https://digital.wbdg.org. ` +
-          `Import a media pack ZIP (content.json + media/…) instead — pack import always works offline.`,
-        true
-      );
-    } else if (result.failed) {
-      setStatus(
-        `Images: ${result.saved} saved, ${result.skipped} already local, ${result.failed} failed (${result.total} total). ` +
-          (result.errors?.[0]?.message || 'See console for paths.'),
-        true
-      );
-    } else {
-      setStatus(
-        `Images: ${result.saved} saved, ${result.skipped} already local (${result.total} total)`
-      );
-    }
-    renderReader();
-  });
 
   document.getElementById('media-pack-input')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
@@ -1080,7 +960,7 @@ function bindNotesUi() {
   document.getElementById('btn-notes-export')?.addEventListener('click', async () => {
     try {
       const versionId = state.current?.versionId || state.current?.content?.criterion?.versionId;
-      const payload = await exportNotesJson(versionId);
+      const payload = await exportNotesJson(versionId, { applicableProject: state.applicableProject || null });
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);

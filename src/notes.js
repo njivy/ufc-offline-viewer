@@ -100,6 +100,7 @@ export function buildNotesExport(notes, meta = {}) {
     exportedAt: new Date().toISOString(),
     scope: meta.scope || (meta.versionId ? 'version' : 'all'),
     versionId: meta.versionId || null,
+    applicableProject: meta.applicableProject || null,
     notes: (notes || []).map((n) => ({
       id: n.id,
       versionId: n.versionId,
@@ -112,11 +113,12 @@ export function buildNotesExport(notes, meta = {}) {
   };
 }
 
-export async function exportNotesJson(versionId = null) {
+export async function exportNotesJson(versionId = null, extraMeta = {}) {
   const notes = versionId ? await listNotesForVersion(versionId) : await listAllNotes();
   return buildNotesExport(notes, {
     scope: versionId ? 'version' : 'all',
     versionId: versionId || null,
+    ...extraMeta,
   });
 }
 
