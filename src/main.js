@@ -54,6 +54,10 @@ let state = {
   syncAsOf: '',
   includeImages: true, // sync/import: fetch or pack-include IMAGE blobs
   mediaStats: null, // { total, local } for current doc
+  samplesOpen: false,
+  advancedOpen: false, // Online directory & sync (library)
+  metaDetailsOpen: false, // reader Details disclosure
+  readerAdvancedOpen: false, // Fetch images / Import media pack
 };
 
 let tocObserver = null;
@@ -187,56 +191,21 @@ function renderLibrary() {
       </tr>`
         )
         .join('')
-    : `<tr><td colspan="6" class="empty">Library is empty. Import a JSON/ZIP export, or click “Import sample fixture”.</td></tr>`;
+    : `<tr><td colspan="6" class="empty">Library is empty. Use <strong>Import pack</strong> below, or open <strong>Samples</strong>.</td></tr>`;
+
+  const samplesOpen = state.samplesOpen ? ' open' : '';
+  const advancedOpen = state.advancedOpen ? ' open' : '';
 
   app.innerHTML = `
     ${banner()}
     <header class="top">
       <h1>UFC Offline Viewer</h1>
-      <p class="lede">Read Unified Facilities Criteria offline in the field — keep a personal library of UFC snapshots on this device, search and review requirements without network, and open the live CIM site when you need the current published version.</p>
+      <p class="lede">Import a UFC pack to read offline. Open the live CIM site when you need the current published version.</p>
     </header>
 
-    <section class="panel">
-      <h2>Import</h2>
-      <div class="import-row">
-        <label class="file-btn">
-          Choose .json or .zip
-          <input type="file" id="file-input" accept=".json,.zip,application/json,application/zip" hidden />
-        </label>
-        <button type="button" id="btn-fixture">Import sample fixture (UFC 1-200-01)</button>
-        <button type="button" class="secondary" id="btn-image-demo">Import image demo pack</button>
-        <a class="link-btn" href="${FIXTURE}" download="ufc-1-200-01-content.json">Download fixture</a>
-        <a class="link-btn" href="${IMAGE_DEMO_PACK}" download="image-demo-pack.zip">Download image demo pack</a>
-      </div>
-      <div id="drop-zone" class="drop-zone" tabindex="0">
-        Or drag &amp; drop a <code>.json</code> / <code>.zip</code> here
-        <span class="hint">Sample path: <code>public/fixtures/ufc-1-200-01-content.json</code> · air-gap pack: <code>content.json</code> + <code>media/…</code></span>
-      </div>
-      <label class="check-row">
-        <input type="checkbox" id="chk-include-images" ${state.includeImages ? 'checked' : ''} />
-        Include images when syncing / importing packs (store blobs in IndexedDB)
-      </label>
-      <p class="hint">Accepts API wrapper <code>{ statusCode, success, data }</code> or unwrapped <code>{ criterion, sections }</code>. ZIP may include <code>media/</code> (relative paths like <code>ces/…/images/foo.png</code>) for offline IMAGE rendering. UFC 1-200-01 sample has 0 IMAGES — use the image demo pack to try blob URLs + “not in pack”.</p>
-    </section>
+    ${statusBlock()}
 
-    <section class="panel">
-      <h2>Online directory &amp; sync</h2>
-      <p class="hint" style="margin-top:0">Pick an <strong>as-of</strong> date to list published UFCs available to sync. Live API works only when this origin is CORS-allowlisted (today: digital.wbdg.org). Otherwise a cached public directory still lets you browse titles — use <strong>Import</strong> above to load content.</p>
-      <div class="sync-row">
-        <label class="sync-asof-label" for="sync-asof">As of</label>
-        <input id="sync-asof" type="date" value="${escapeHtml(state.syncAsOf || '')}" aria-label="asOf date YYYY-MM-DD" />
-        <button type="button" id="btn-load-directory">Load directory</button>
-        <button type="button" class="secondary" id="btn-load-cached">Show cached directory</button>
-      </div>
-      ${renderDirectoryBlock()}
-      <div class="sync-row" style="margin-top:0.75rem">
-        <input id="sync-version" type="text" value="${SAMPLE_VERSION_ID}" aria-label="versionId" placeholder="versionId UUID" />
-        <button type="button" id="btn-sync">Try sync version</button>
-      </div>
-      <p class="hint">Sync prefers <code>GET /v1/versions/{id}/content</code> then optional <code>GET /v1/storage/files/{path}</code> per IMAGE (not the export zip). No proxy — on CORS failure, import a JSON/ZIP pack with <code>media/</code> instead.</p>
-    </section>
-
-    <section class="panel">
+    <section class="panel library-panel" id="library-panel">
       <h2>Library</h2>
       <div class="table-scroll">
         <table class="lib">
@@ -255,7 +224,58 @@ function renderLibrary() {
       </div>
     </section>
 
-    ${statusBlock()}
+    <section class="panel import-panel">
+      <h2>Import pack</h2>
+      <div class="import-row">
+        <label class="file-btn">
+          Choose .json or .zip
+          <input type="file" id="file-input" accept=".json,.zip,application/json,application/zip" hidden />
+        </label>
+      </div>
+      <div id="drop-zone" class="drop-zone" tabindex="0">
+        Or drag &amp; drop a <code>.json</code> / <code>.zip</code> here
+        <span class="hint">Air-gap pack: <code>content.json</code> + <code>media/…</code></span>
+      </div>
+      <details class="disclosure samples-disclosure" id="samples-details"${samplesOpen}>
+        <summary>Samples</summary>
+        <div class="disclosure-body">
+          <div class="import-row">
+            <button type="button" id="btn-fixture">Import sample fixture (UFC 1-200-01)</button>
+            <button type="button" class="secondary" id="btn-image-demo">Import image demo pack</button>
+            <a class="link-btn" href="${FIXTURE}" download="ufc-1-200-01-content.json">Download fixture</a>
+            <a class="link-btn" href="${IMAGE_DEMO_PACK}" download="image-demo-pack.zip">Download image demo pack</a>
+          </div>
+          <p class="hint">UFC 1-200-01 sample has 0 IMAGES — use the image demo pack to try blob URLs + “not in pack”.</p>
+        </div>
+      </details>
+    </section>
+
+    <details class="panel disclosure advanced-disclosure" id="advanced-details"${advancedOpen}>
+      <summary class="advanced-summary">
+        <span class="advanced-summary-title">Advanced</span>
+        <span class="muted">Online directory, API sync, air-gap options</span>
+      </summary>
+      <div class="disclosure-body">
+        <h3 class="disclosure-h3">Online directory &amp; sync</h3>
+        <p class="hint" style="margin-top:0">Live API works only when this origin is CORS-allowlisted (today: digital.wbdg.org). Otherwise browse the cached directory — prefer <strong>Import pack</strong> above.</p>
+        <div class="sync-row">
+          <label class="sync-asof-label" for="sync-asof">As of</label>
+          <input id="sync-asof" type="date" value="${escapeHtml(state.syncAsOf || '')}" aria-label="asOf date YYYY-MM-DD" />
+          <button type="button" id="btn-load-directory">Load directory</button>
+          <button type="button" class="secondary" id="btn-load-cached">Show cached directory</button>
+        </div>
+        ${renderDirectoryBlock()}
+        <div class="sync-row" style="margin-top:0.75rem">
+          <input id="sync-version" type="text" value="${SAMPLE_VERSION_ID}" aria-label="versionId" placeholder="versionId UUID" />
+          <button type="button" id="btn-sync">Try sync version</button>
+        </div>
+        <label class="check-row">
+          <input type="checkbox" id="chk-include-images" ${state.includeImages ? 'checked' : ''} />
+          Include images when syncing / importing packs (store blobs in IndexedDB)
+        </label>
+        <p class="hint">Sync prefers <code>GET /v1/versions/{id}/content</code> then optional storage file GETs. On CORS failure, import a JSON/ZIP pack with <code>media/</code> instead.</p>
+      </div>
+    </details>
   `;
 
   bindLibrary();
@@ -465,6 +485,13 @@ function bindLibrary() {
   document.getElementById('chk-include-images')?.addEventListener('change', (e) => {
     state.includeImages = !!e.target.checked;
   });
+
+  document.getElementById('samples-details')?.addEventListener('toggle', (e) => {
+    state.samplesOpen = e.target.open;
+  });
+  document.getElementById('advanced-details')?.addEventListener('toggle', (e) => {
+    state.advancedOpen = e.target.open;
+  });
 }
 
 async function doSyncVersion(vid) {
@@ -495,7 +522,7 @@ async function doSyncVersion(vid) {
             },
           });
           if (imgResult.corsBlocked) {
-            imgMsg = ` · images blocked by CORS (${imgResult.failed}/${imgResult.total}) — import a media pack`;
+            imgMsg = ` · live image fetch CORS-blocked (${imgResult.failed}/${imgResult.total}; allowlist e.g. digital.wbdg.org) — import a media pack instead`;
           } else if (imgResult.failed) {
             imgMsg = ` · images ${imgResult.saved} saved, ${imgResult.failed} failed`;
           } else {
@@ -556,18 +583,26 @@ function readerActionLinks(versionId) {
   const mediaHint = ms
     ? `<p class="hint media-stat-hint">Images in IndexedDB: <strong>${ms.local}</strong> / ${ms.total} referenced</p>`
     : '';
+  const advOpen = state.readerAdvancedOpen ? ' open' : '';
   return `
     <div class="live-links">
       <a class="link-btn primary" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
       <button type="button" class="secondary" id="btn-export-pack" title="JSON + media/ for air-gap">Export pack</button>
-      <button type="button" class="secondary" id="btn-fetch-images" title="GET /v1/storage/files/… when CORS allows">Fetch images</button>
-      <label class="file-btn secondary-file">
-        Import media pack…
-        <input type="file" id="media-pack-input" accept=".zip,application/zip" hidden />
-      </label>
     </div>
-    ${mediaHint}
-    <p class="write-hint">Formal change requests and other writes happen on the live CIM site. Local notes stay in this browser and do not sync to CIM. See docs/CCR-PLAN.md. Offline images use blob: URLs from IndexedDB — never hot-linked when offline.</p>`;
+    <details class="disclosure reader-advanced" id="reader-advanced"${advOpen}>
+      <summary>Advanced — media / API</summary>
+      <div class="disclosure-body">
+        <div class="live-links">
+          <button type="button" class="secondary" id="btn-fetch-images" title="GET /v1/storage/files/… when CORS allows">Fetch images</button>
+          <label class="file-btn secondary-file">
+            Import media pack…
+            <input type="file" id="media-pack-input" accept=".zip,application/zip" hidden />
+          </label>
+        </div>
+        ${mediaHint}
+        <p class="write-hint">Writes (CCR) stay on the live CIM site — use Open on live site. Local notes never sync. Offline images use IndexedDB blob URLs.</p>
+      </div>
+    </details>`;
 }
 
 function renderNotesPanel() {
@@ -689,6 +724,7 @@ function renderReader() {
     importedAt: doc.importedAt,
     source: doc.source,
     requirementCount: allRows.length,
+    open: state.metaDetailsOpen,
   });
 
   const modeToggle = `
@@ -862,7 +898,14 @@ function renderReader() {
     renderLibrary();
   });
 
-  document.getElementById('btn-export-pack')?.addEventListener('click', async () => {
+  document.getElementById('meta-details')?.addEventListener('toggle', (e) => {
+    state.metaDetailsOpen = e.target.open;
+  });
+  document.getElementById('reader-advanced')?.addEventListener('toggle', (e) => {
+    state.readerAdvancedOpen = e.target.open;
+  });
+
+    document.getElementById('btn-export-pack')?.addEventListener('click', async () => {
     try {
       setStatus('Building pack (JSON + media)…');
       const pack = await buildMediaPackZip(state.current, { includeMedia: true });
@@ -892,7 +935,8 @@ function renderReader() {
       renderReader();
       return;
     }
-    setStatus(`Fetching images 0/${assets.length}…`);
+    state.readerAdvancedOpen = true;
+    setStatus(`Fetching images 0/${assets.length} via api.digital.wbdg.org/v1/storage/files/…`);
     renderReader();
     const result = await syncImagesForContent(versionId, sections, {
       skipExisting: true,
@@ -907,12 +951,20 @@ function renderReader() {
     await refreshMediaStats();
     if (result.corsBlocked) {
       setStatus(
-        `CORS blocked storage fetches (${result.failed}/${result.total}). Import a media pack ZIP with media/… instead.`,
+        `Live image fetch failed: CORS blocked GET /v1/storage/files/… (${result.failed}/${result.total}). ` +
+          `Storage API only allowlists origins such as https://digital.wbdg.org. ` +
+          `Import a media pack ZIP (content.json + media/…) instead — pack import always works offline.`,
+        true
+      );
+    } else if (result.failed) {
+      setStatus(
+        `Images: ${result.saved} saved, ${result.skipped} already local, ${result.failed} failed (${result.total} total). ` +
+          (result.errors?.[0]?.message || 'See console for paths.'),
         true
       );
     } else {
       setStatus(
-        `Images: ${result.saved} saved, ${result.skipped} already local, ${result.failed} failed (${result.total} total)`
+        `Images: ${result.saved} saved, ${result.skipped} already local (${result.total} total)`
       );
     }
     renderReader();

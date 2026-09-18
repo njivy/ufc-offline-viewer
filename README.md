@@ -36,9 +36,11 @@ A sample content payload for **UFC 1-200-01 — DoD Building Code** ships at:
 
 In the app:
 
-1. Click **Import sample fixture (UFC 1-200-01)**, or
-2. **Download fixture** then drag-drop / Choose file, or
+1. **Import pack** — Choose file or drag-drop a `.json` / `.zip`, or
+2. Open **Samples** → **Import sample fixture (UFC 1-200-01)** / image demo pack, or
 3. Drag-drop `public/fixtures/ufc-1-200-01-content.json` from disk onto the drop zone.
+
+**Library** is listed above Import so newly imported docs stay visible. Online directory / API sync live under **Advanced** (collapsed by default).
 
 See [IMPORT.md](./IMPORT.md) for export sources and zip notes.
 
@@ -74,7 +76,10 @@ Offline-only notes tagged to sections or sentences. They live in IndexedDB and *
 
 Formal CCR / writes: **Open on live site** only. Plan: [docs/CCR-PLAN.md](./docs/CCR-PLAN.md) (approved: link-out only; no in-app CCR).
 
-## Offline images (v0.5)
+## Offline images (v0.5+)
+
+**Pack import always works** (ZIP with `media/` → IndexedDB blobs). **Live** `GET /v1/storage/files/{path}` (Fetch images / include-images sync) only succeeds when the API CORS-allowlists this origin (e.g. `https://digital.wbdg.org`). Off allowlist you get a clear CORS error and guidance to import a media pack — never a silent fail.
+
 
 UFC content references figures via `mediaAsset` (`type: IMAGE`, relative `url` / `sourcePath` like `ces/…/images/foo.png`). Tables stay inline HTML; images are separate binaries.
 
@@ -95,7 +100,8 @@ Try: import `public/fixtures/image-demo-pack.zip` — one figure renders, one in
 ## TOC & metadata (v0.3)
 
 - Polished left Contents nav with depth rail, chapter weight, and scrollspy active state
-- Shared **Document metadata** panel in both Document and Requirements table modes (designation, version, status, importedAt/source, metadataFields)
+- Compact **Details** disclosure for document metadata/provenance (both reader modes)
+- Library-first home chrome; Samples + Advanced disclosures; reader **Advanced** for Fetch images / Import media pack (Open on live site + Export pack stay primary)
 
 ## Out of scope (by design)
 

@@ -48,8 +48,8 @@ export function walkToc(sections, depth = 0, out = []) {
 }
 
 /**
- * Shared document metadata panel — used in document and table reader modes.
- * extras: { importedAt, source, requirementCount }
+ * Shared document metadata — compact <details> disclosure (reader header).
+ * extras: { importedAt, source, requirementCount, open }
  */
 export function renderDocMetaPanel(criterion, content, extras = {}) {
   const c = criterion || {};
@@ -85,11 +85,24 @@ export function renderDocMetaPanel(criterion, content, extras = {}) {
 
   if (!rows.length) return '';
 
+  const openAttr = extras.open ? ' open' : '';
+  const summaryBits = [
+    c.designation,
+    c.versionNumber ? `v${c.versionNumber}` : null,
+    extras.source || null,
+  ].filter(Boolean);
+  const summaryLine = summaryBits.length
+    ? escapeHtml(summaryBits.join(' · '))
+    : 'Document metadata & provenance';
+
   return `
-    <section class="meta-panel" aria-label="Document metadata">
-      <h2 class="meta-panel-title">Document metadata</h2>
+    <details class="meta-panel" id="meta-details"${openAttr}>
+      <summary class="meta-panel-summary">
+        <span class="meta-panel-title">Details</span>
+        <span class="meta-summary-line">${summaryLine}</span>
+      </summary>
       <dl class="meta-grid">${rows.join('')}</dl>
-    </section>`;
+    </details>`;
 }
 
 function formatMetaDate(iso) {

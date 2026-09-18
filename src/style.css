@@ -717,22 +717,56 @@ code {
   .reader-with-notes { grid-template-columns: 1fr; }
 }
 
-/* —— Shared metadata panel —— */
+/* —— Shared metadata panel (compact Details disclosure) —— */
 .meta-panel {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 0.85rem 1.1rem 1rem;
+  padding: 0.55rem 1.1rem 0.65rem;
   margin-bottom: 1rem;
 }
+.meta-panel[open] {
+  padding-bottom: 1rem;
+}
+.meta-panel-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  padding: 0.2rem 0;
+}
+.meta-panel-summary::-webkit-details-marker { display: none; }
+.meta-panel-summary::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: 0.75rem;
+  width: 0.85rem;
+  flex-shrink: 0;
+}
+.meta-panel[open] > .meta-panel-summary::before { content: "▾"; }
 .meta-panel-title {
-  margin: 0 0 0.55rem;
+  margin: 0;
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
   font-weight: 700;
+}
+.meta-summary-line {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.meta-panel .meta-grid {
+  margin-top: 0.65rem;
 }
 .meta-grid {
   display: grid;
@@ -1092,3 +1126,72 @@ label.secondary-file {
   font-size: 0.85rem;
   padding: 0.4rem 0.75rem;
 }
+
+/* —— Disclosures (Samples / Advanced) —— */
+.disclosure {
+  margin-top: 0.85rem;
+}
+.disclosure > summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 650;
+  font-size: 0.92rem;
+  color: var(--ink);
+  padding: 0.35rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+}
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: 0.75rem;
+  width: 0.85rem;
+  flex-shrink: 0;
+}
+.disclosure[open] > summary::before { content: "▾"; }
+.disclosure-body {
+  padding: 0.35rem 0 0.15rem;
+}
+.disclosure-h3 {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+.advanced-disclosure.panel {
+  padding-top: 0.65rem;
+  padding-bottom: 0.85rem;
+}
+.advanced-disclosure > .advanced-summary {
+  margin: 0;
+}
+.advanced-summary-title {
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+}
+.samples-disclosure {
+  border-top: 1px solid var(--border);
+  padding-top: 0.55rem;
+}
+.reader-advanced {
+  margin-top: 0.45rem;
+  width: 100%;
+}
+.reader-advanced > summary {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.library-panel {
+  /* Keep library above Import chrome so imports aren’t below the fold */
+  position: relative;
+  z-index: 1;
+}
+.import-panel .drop-zone {
+  margin-top: 0.65rem;
+}
+.import-panel .import-row {
+  margin-bottom: 0;
+}
+
