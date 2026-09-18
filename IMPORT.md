@@ -33,17 +33,19 @@ or just the inner `data` object.
 
 Body text is on **TEXT** nodes via `sentences[].text`. Tables use `mediaAsset.type === "TABLE"` with HTML in `mediaAsset.content`.
 
-## Mode B (API sync)
+## Mode B (API sync / directory)
 
-The app can attempt:
+The app can:
 
-`GET https://api.digital.wbdg.org/v1/versions/{versionId}/content`
+1. Load a preliminary directory via `GET /v1/snapshots/resolve?asOf=YYYY-MM-DD` (preferred) or `GET /v1/ces/published`
+2. Sync a chosen version via `GET /v1/versions/{versionId}/content`
+3. Fall back to bundled `catalog/preliminary-directory.json` when live fetch fails (browse titles only — still import for content)
 
 The public API currently allowlists `Origin: https://digital.wbdg.org` only. From localhost or other hosts, the browser will fail with CORS — the UI then points you back here. **Do not add a proxy** to work around this.
 
 ## Live writes
 
-Use **Open on live site** → `https://digital.wbdg.org/versions/{versionId}` (login / CCR there). This offline viewer does not write to CIM.
+Use **Open on live site** → `https://digital.wbdg.org/versions/{versionId}` (complete CCR / writes there). This offline viewer does not write to CIM — see docs/CCR-PLAN.md.
 
 ### file:// / double-click
 Open `ufc-offline-viewer.html` (or `index.html` with its `assets/` folder). Import JSON/ZIP via the file picker — do not rely on the sample-fixture button under `file://`.

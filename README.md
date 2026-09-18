@@ -6,7 +6,7 @@ Static browser app for **offline reading** of Unified Facilities Criteria (UFC) 
 
 - **Mode A (primary):** Import `.json` or `.zip` (containing JSON) → IndexedDB → fully offline read.
 - **Mode B (stub):** Try `fetch` to `https://api.digital.wbdg.org`; on CORS failure, show Import guidance. **No proxy.**
-- **Writes:** “Open on live site” / **Criteria Change Request** link out to digital.wbdg.org. Local notes stay in IndexedDB and never sync.
+- **Writes:** “Open on live site” only (link-out). Formal CCR stays on digital.wbdg.org — see [docs/CCR-PLAN.md](./docs/CCR-PLAN.md). Local notes stay in IndexedDB and never sync.
 
 ## Quick start
 
@@ -62,17 +62,24 @@ See [IMPORT.md](./IMPORT.md) for export sources and zip notes.
 
 https://github.com/njivy/ufc-offline-viewer
 
-## Local commentary (v0.3)
+## Local commentary (v0.3+)
 
 Offline-only notes tagged to sections or sentences. They live in IndexedDB and **do not sync** to CIM.
 
 1. Import the sample fixture (or any content JSON) and open the document.
 2. On a section heading, click **Note** (or the subtle ✉ control on a sentence).
 3. Enter text → **Save**. The notes panel lists all notes for this version.
-4. Reload the page, re-open the document — the note is still there.
-5. Click a note in the panel to jump to its target; use Edit / Delete as needed.
+4. **Export notes JSON** / **Import notes…** in the notes panel — versioned format `ufc-offline-notes` v1; choose **merge** or **replace**.
+5. Reload the page, re-open the document — notes persist locally.
 
-CCR / formal writes still happen only on the live site (links in the reader header).
+Formal CCR / writes: **Open on live site** only. Plan: [docs/CCR-PLAN.md](./docs/CCR-PLAN.md) (do not re-implement CCR in-app until approved).
+
+## Online directory & asOf sync (v0.4)
+
+1. On the library page, set **As of** (YYYY-MM-DD) → **Load directory**.
+2. Prefer live `GET /v1/snapshots/resolve?asOf=` (falls back to `GET /v1/ces/published`, then bundled `catalog/preliminary-directory.json`).
+3. If CORS blocks the API, the UI explains why and still shows the cached directory; use **Import** for content.
+4. Pick a row → **Sync** (tries content pull) or **Use id** + **Try sync version**.
 
 ## TOC & metadata (v0.3)
 
@@ -81,7 +88,7 @@ CCR / formal writes still happen only on the live site (links in the reader head
 
 ## Out of scope (by design)
 
-No backend, no CORS proxy, no local field scripts, no binary desktop app, no CIM/CCR writes inside this app (local notes only).
+No backend, no CORS proxy, no local field scripts, no binary desktop app, no CIM/CCR writes inside this app (local notes only; link-out for formal CCR).
 
 
 ## Open from disk (no web host)

@@ -961,3 +961,80 @@ code {
 }
 
 #app { max-width: min(1400px, 100%); }
+
+/* Online directory (asOf sync) */
+.sync-asof-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+#sync-asof,
+#dir-filter {
+  padding: 0.48rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font: inherit;
+}
+#dir-filter { flex: 1; min-width: 180px; }
+.dir-banner {
+  margin-top: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 0.85rem;
+  background: #fafbfc;
+}
+.dir-banner.error {
+  border-color: #e2a8a8;
+  background: #fff5f5;
+}
+.dir-banner-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.dir-table-wrap {
+  margin-top: 0.55rem;
+  max-height: 280px;
+}
+.pill.warn {
+  background: #fff4d6;
+  color: #7a5b00;
+  border: 1px solid #f0d58a;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+.pill.ok-pill {
+  background: #e7f6ec;
+  color: #1b6b38;
+  border: 1px solid #b7e0c4;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+.dir-empty { margin: 0.65rem 0 0; }
+
+/* Notes import/export */
+.notes-io {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.35rem 0 0.65rem;
+}
+.notes-io .file-btn.secondary-file,
+label.secondary-file {
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--border-strong);
+  font-weight: 550;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.75rem;
+}
+.notes-io .file-btn.secondary-file:hover {
+  background: #f3f5f8;
+}
+.notes-io button.secondary {
+  font-size: 0.85rem;
+  padding: 0.4rem 0.75rem;
+}

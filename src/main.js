@@ -10,8 +10,15 @@ import {
   requirementsToCsv,
   renderDocMetaPanel,
 } from './render.js';
-import { trySyncFromApi, liveVersionUrl, liveCcrUrl, ccrHubUrl } from './api.js';
-import { listNotesForVersion, countNotesByTarget, saveNote, deleteNote } from './notes.js';
+import { trySyncFromApi, liveVersionUrl, loadPreliminaryDirectory, loadCachedDirectory } from './api.js';
+import {
+  listNotesForVersion,
+  countNotesByTarget,
+  saveNote,
+  deleteNote,
+  exportNotesJson,
+  importNotesPayload,
+} from './notes.js';
 
 const FIXTURE = '/fixtures/ufc-1-200-01-content.json';
 const SAMPLE_VERSION_ID = 'a093a449-9220-45e0-866a-67d3139af067';
@@ -31,6 +38,9 @@ let state = {
   noteCounts: {},
   noteDraft: null, // { targetType, targetId, noteId?, body }
   notesPanelOpen: true,
+  directory: null, // { ok, items, label, stale, source, asOf, liveError? }
+  directoryFilter: '',
+  syncAsOf: '',
 };
 
 let tocObserver = null;
@@ -60,6 +70,80 @@ function banner() {
   return `<div class="banner" role="status">Offline snapshot · not live CIM</div>`;
 }
 
+function renderDirectoryBlock() {
+  const dir = state.directory;
+  if (!dir) {
+    return `<p class="hint dir-empty">No directory loaded yet. Choose an as-of date and click <strong>Load directory</strong>, or show the cached public list.</p>`;
+  }
+  if (!dir.ok) {
+    return `<div class="dir-banner error">
+      <p><strong>Could not load live directory.</strong> ${escapeHtml(dir.message || 'Unknown error')}</p>
+      <p class="hint">The public API only allowlists <code>https://digital.wbdg.org</code> for browser CORS. Mode A <strong>Import</strong> still works — download a JSON/ZIP export elsewhere and import it above.</p>
+    </div>`;
+  }
+  const q = (state.directoryFilter || '').trim().toLowerCase();
+  let items = dir.items || [];
+  if (q) {
+    items = items.filter((i) =>
+      [i.designation, i.title, i.series, i.versionId, i.versionNumber]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    );
+  }
+  const staleNote = dir.stale
+    ? `<span class="pill warn">cached — may be stale</span>`
+    : `<span class="pill ok-pill">${escapeHtml(dir.source || 'live')}</span>`;
+  const corsNote =
+    dir.liveError && dir.liveError.corsLikely
+      ? `<p class="hint">Live API was blocked by CORS; showing ${dir.stale ? 'cached' : 'fallback'} directory. Content sync will likely fail too — prefer Import.</p>`
+      : '';
+  const rows = items.length
+    ? items
+        .map((i) => {
+          const inLib = state.docs.some((d) => d.versionId === i.versionId);
+          return `<tr>
+            <td><strong>${escapeHtml(i.designation)}</strong></td>
+            <td>${escapeHtml(i.title)}</td>
+            <td>${escapeHtml(i.versionNumber || '—')}</td>
+            <td class="mono">${escapeHtml((i.versionId || '').slice(0, 8))}…</td>
+            <td class="actions">
+              ${inLib ? '<span class="muted">In library</span>' : ''}
+              <button type="button" data-dir-sync="${escapeHtml(i.versionId)}" title="Try API sync">Sync</button>
+              <button type="button" class="secondary" data-dir-fill="${escapeHtml(i.versionId)}">Use id</button>
+            </td>
+          </tr>`;
+        })
+        .join('')
+    : `<tr><td colspan="5" class="empty">No documents match this filter.</td></tr>`;
+  return `
+    <div class="dir-banner">
+      <div class="dir-banner-head">
+        <strong>${escapeHtml(dir.label || 'Directory')}</strong>
+        ${staleNote}
+        <span class="muted">${items.length} / ${(dir.items || []).length} shown</span>
+      </div>
+      ${corsNote}
+      <div class="sync-row" style="margin-top:0.5rem">
+        <input type="search" id="dir-filter" placeholder="Filter directory…" value="${escapeHtml(state.directoryFilter || '')}" />
+      </div>
+      <div class="table-scroll dir-table-wrap">
+        <table class="lib dir-table">
+          <thead>
+            <tr>
+              <th>Designation</th>
+              <th>Title</th>
+              <th>Version</th>
+              <th>versionId</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 function renderLibrary() {
   const rows = state.docs.length
     ? state.docs
@@ -84,7 +168,7 @@ function renderLibrary() {
     ${banner()}
     <header class="top">
       <h1>UFC Offline Viewer</h1>
-      <p class="lede">Import public CIM JSON or JSON.zip into this browser’s IndexedDB, then read fully offline. API sync is optional and often blocked by CORS outside digital.wbdg.org.</p>
+      <p class="lede">Read Unified Facilities Criteria offline in the field — keep a personal library of UFC snapshots on this device, search and review requirements without network, and open the live CIM site when you need the current published version.</p>
     </header>
 
     <section class="panel">
@@ -105,12 +189,20 @@ function renderLibrary() {
     </section>
 
     <section class="panel">
-      <h2>Sync from API (Mode B stub)</h2>
+      <h2>Online directory &amp; sync</h2>
+      <p class="hint" style="margin-top:0">Pick an <strong>as-of</strong> date to list published UFCs available to sync. Live API works only when this origin is CORS-allowlisted (today: digital.wbdg.org). Otherwise a cached public directory still lets you browse titles — use <strong>Import</strong> above to load content.</p>
       <div class="sync-row">
-        <input id="sync-version" type="text" value="${SAMPLE_VERSION_ID}" aria-label="versionId" />
-        <button type="button" id="btn-sync">Try sync</button>
+        <label class="sync-asof-label" for="sync-asof">As of</label>
+        <input id="sync-asof" type="date" value="${escapeHtml(state.syncAsOf || '')}" aria-label="asOf date YYYY-MM-DD" />
+        <button type="button" id="btn-load-directory">Load directory</button>
+        <button type="button" class="secondary" id="btn-load-cached">Show cached directory</button>
       </div>
-      <p class="hint">Calls <code>GET https://api.digital.wbdg.org/v1/versions/{id}/content</code>. On CORS failure, shows Import guidance — no proxy.</p>
+      ${renderDirectoryBlock()}
+      <div class="sync-row" style="margin-top:0.75rem">
+        <input id="sync-version" type="text" value="${SAMPLE_VERSION_ID}" aria-label="versionId" placeholder="versionId UUID" />
+        <button type="button" id="btn-sync">Try sync version</button>
+      </div>
+      <p class="hint">Sync calls <code>GET /v1/versions/{id}/content</code>. No proxy — on CORS failure, import a JSON/ZIP export instead.</p>
     </section>
 
     <section class="panel">
@@ -184,21 +276,79 @@ function bindLibrary() {
 
   document.getElementById('btn-sync')?.addEventListener('click', async () => {
     const vid = document.getElementById('sync-version')?.value?.trim() || SAMPLE_VERSION_ID;
-    setStatus('Trying API sync…');
+    await doSyncVersion(vid);
+  });
+
+  const asofEl = document.getElementById('sync-asof');
+  asofEl?.addEventListener('change', () => {
+    state.syncAsOf = asofEl.value || '';
+  });
+
+  document.getElementById('btn-load-directory')?.addEventListener('click', async () => {
+    const asOf = document.getElementById('sync-asof')?.value?.trim() || '';
+    state.syncAsOf = asOf;
+    if (!asOf) {
+      setStatus('Pick an as-of date (YYYY-MM-DD), or use “Show cached directory”.', true);
+      renderLibrary();
+      return;
+    }
+    setStatus(`Loading directory asOf ${asOf}…`);
     renderLibrary();
-    const result = await trySyncFromApi(vid);
+    const result = await loadPreliminaryDirectory(asOf);
+    state.directory = result;
+    state.directoryFilter = '';
     if (result.ok) {
-      try {
-        const rec = await saveDoc(result.data, 'api-sync');
-        await refreshLibrary();
-        setStatus(`Synced ${rec.designation} from API`);
-      } catch (err) {
-        setStatus('API OK but save failed: ' + (err.message || err), true);
-      }
+      setStatus(`Directory: ${result.items.length} documents (${result.label})`);
     } else {
-      setStatus(result.message, true);
+      setStatus(result.message || 'Directory load failed', true);
     }
     renderLibrary();
+  });
+
+  document.getElementById('btn-load-cached')?.addEventListener('click', async () => {
+    setStatus('Loading cached public directory…');
+    renderLibrary();
+    const result = await loadCachedDirectory();
+    state.directory = result;
+    state.directoryFilter = '';
+    if (result.ok) {
+      setStatus(`Cached directory: ${result.items.length} documents`);
+    } else {
+      setStatus(result.message || 'Cached directory missing', true);
+    }
+    renderLibrary();
+  });
+
+  let dirFilterTimer;
+  document.getElementById('dir-filter')?.addEventListener('input', (e) => {
+    clearTimeout(dirFilterTimer);
+    dirFilterTimer = setTimeout(() => {
+      state.directoryFilter = e.target.value || '';
+      renderLibrary();
+      const again = document.getElementById('dir-filter');
+      if (again) {
+        again.focus();
+        again.setSelectionRange(again.value.length, again.value.length);
+      }
+    }, 160);
+  });
+
+  app.querySelectorAll('[data-dir-sync]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const vid = btn.getAttribute('data-dir-sync');
+      if (vid) await doSyncVersion(vid);
+    });
+  });
+
+  app.querySelectorAll('[data-dir-fill]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const vid = btn.getAttribute('data-dir-fill');
+      const input = document.getElementById('sync-version');
+      if (input && vid) {
+        input.value = vid;
+        input.focus();
+      }
+    });
   });
 
   const zone = document.getElementById('drop-zone');
@@ -252,6 +402,24 @@ function bindLibrary() {
   });
 }
 
+async function doSyncVersion(vid) {
+  setStatus(`Trying API sync for ${vid}…`);
+  renderLibrary();
+  const result = await trySyncFromApi(vid);
+  if (result.ok) {
+    try {
+      const rec = await saveDoc(result.data, 'api-sync');
+      await refreshLibrary();
+      setStatus(`Synced ${rec.designation} from API`);
+    } catch (err) {
+      setStatus('API OK but save failed: ' + (err.message || err), true);
+    }
+  } else {
+    setStatus(result.message, true);
+  }
+  renderLibrary();
+}
+
 async function doImport(file) {
   try {
     setStatus(`Importing ${file.name}…`);
@@ -268,15 +436,11 @@ async function doImport(file) {
 
 function readerActionLinks(versionId) {
   const live = liveVersionUrl(versionId);
-  const ccr = liveCcrUrl(versionId);
-  const hub = ccrHubUrl();
   return `
     <div class="live-links">
       <a class="link-btn primary" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
-      <a class="link-btn" href="${escapeHtml(ccr)}" target="_blank" rel="noopener noreferrer">Criteria Change Request</a>
-      <a class="link-btn subtle" href="${escapeHtml(hub)}" target="_blank" rel="noopener noreferrer">CCR hub</a>
     </div>
-    <p class="write-hint">Writes happen on the live site only. Local notes stay in this browser and do not sync to CIM.</p>`;
+    <p class="write-hint">Formal change requests and other writes happen on the live CIM site. Local notes stay in this browser and do not sync to CIM. See docs/CCR-PLAN.md.</p>`;
 }
 
 function renderNotesPanel() {
@@ -308,6 +472,13 @@ function renderNotesPanel() {
         <button type="button" class="secondary" id="btn-toggle-notes" aria-expanded="${open}">${open ? 'Hide' : 'Show'}</button>
       </div>
       <p class="hint notes-offline-hint">Offline-only · stored in IndexedDB · never syncs to CIM</p>
+      <div class="notes-io" ${open ? '' : 'hidden'}>
+        <button type="button" class="secondary" id="btn-notes-export">Export notes JSON</button>
+        <label class="file-btn secondary-file">
+          Import notes…
+          <input type="file" id="notes-import-input" accept=".json,application/json" hidden />
+        </label>
+      </div>
       <ul class="notes-list" ${open ? '' : 'hidden'}>${list}</ul>
     </aside>`;
 }
@@ -639,6 +810,66 @@ function bindNotesUi() {
     renderReader();
   });
 
+  document.getElementById('btn-notes-export')?.addEventListener('click', async () => {
+    try {
+      const versionId = state.current?.versionId || state.current?.content?.criterion?.versionId;
+      const payload = await exportNotesJson(versionId);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      const des = (state.current?.designation || 'notes').replace(/\s+/g, '-');
+      a.download = `${des}-notes.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setStatus(`Exported ${payload.notes.length} note(s)`);
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+      renderReader();
+    }
+  });
+
+  document.getElementById('notes-import-input')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      let raw;
+      try {
+        raw = JSON.parse(text);
+      } catch (err) {
+        throw new Error('Notes file is not valid JSON');
+      }
+      const versionId = state.current?.versionId || state.current?.content?.criterion?.versionId;
+      const choice = window.prompt(
+        'Import mode for local notes:\n\n' +
+          'merge — keep existing notes; add/update from file (by id or same target)\n' +
+          'replace — delete this version’s notes, then import from file\n\n' +
+          'Type merge or replace:',
+        'merge'
+      );
+      if (choice == null) return;
+      const mode = String(choice).trim().toLowerCase() === 'replace' ? 'replace' : 'merge';
+      if (mode === 'replace') {
+        const ok = confirm(
+          'Replace will delete all local notes for this document version, then import from the file. Continue?'
+        );
+        if (!ok) return;
+      }
+      const result = await importNotesPayload(raw, { mode, versionId });
+      await refreshNotes();
+      setStatus(
+        `Notes ${result.mode}: saved ${result.saved}` +
+          (result.deleted ? `, removed ${result.deleted}` : '') +
+          (result.updated ? ` (${result.updated} updated)` : '')
+      );
+      renderReader();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+      renderReader();
+    }
+  });
+
   const openDraft = (targetType, targetId, existing) => {
     state.noteDraft = {
       targetType,
@@ -762,6 +993,11 @@ function jumpToNoteTarget(type, id) {
 }
 
 async function boot() {
+  if (!state.syncAsOf) {
+    // Default asOf: today (local), clamped sensibly for snapshot API (not future beyond today)
+    const d = new Date();
+    state.syncAsOf = d.toISOString().slice(0, 10);
+  }
   try {
     await refreshLibrary();
   } catch (err) {
