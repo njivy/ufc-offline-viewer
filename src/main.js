@@ -1,6 +1,6 @@
 import './style.css';
 import { listDocs, getDoc, deleteDoc, saveDoc } from './db.js';
-import { importFile, importFromUrl } from './import.js';
+import { importFile, importFromUrl, importMediaPackFile } from './import.js';
 import {
   walkToc,
   renderDocumentBody,
@@ -19,8 +19,19 @@ import {
   exportNotesJson,
   importNotesPayload,
 } from './notes.js';
+import {
+  collectImageAssets,
+  syncImagesForContent,
+  hydrateDocumentImages,
+  buildMediaPackZip,
+  deleteMediaForVersion,
+  listMediaForVersion,
+  revokeAllObjectUrls,
+  revokeObjectUrlsForVersion,
+} from './media.js';
 
 const FIXTURE = '/fixtures/ufc-1-200-01-content.json';
+const IMAGE_DEMO_PACK = './fixtures/image-demo-pack.zip';
 const SAMPLE_VERSION_ID = 'a093a449-9220-45e0-866a-67d3139af067';
 
 const app = document.querySelector('#app');
@@ -41,12 +52,26 @@ let state = {
   directory: null, // { ok, items, label, stale, source, asOf, liveError? }
   directoryFilter: '',
   syncAsOf: '',
+  includeImages: true, // sync/import: fetch or pack-include IMAGE blobs
+  mediaStats: null, // { total, local } for current doc
 };
 
 let tocObserver = null;
 
 async function refreshLibrary() {
   state.docs = await listDocs();
+}
+
+async function refreshMediaStats() {
+  const doc = state.current;
+  if (!doc) {
+    state.mediaStats = null;
+    return;
+  }
+  const versionId = doc.versionId || doc.content?.criterion?.versionId;
+  const assets = collectImageAssets(doc.content?.sections || []);
+  const local = await listMediaForVersion(versionId);
+  state.mediaStats = { total: assets.length, local: local.length };
 }
 
 async function refreshNotes() {
@@ -179,13 +204,19 @@ function renderLibrary() {
           <input type="file" id="file-input" accept=".json,.zip,application/json,application/zip" hidden />
         </label>
         <button type="button" id="btn-fixture">Import sample fixture (UFC 1-200-01)</button>
+        <button type="button" class="secondary" id="btn-image-demo">Import image demo pack</button>
         <a class="link-btn" href="${FIXTURE}" download="ufc-1-200-01-content.json">Download fixture</a>
+        <a class="link-btn" href="${IMAGE_DEMO_PACK}" download="image-demo-pack.zip">Download image demo pack</a>
       </div>
       <div id="drop-zone" class="drop-zone" tabindex="0">
         Or drag &amp; drop a <code>.json</code> / <code>.zip</code> here
-        <span class="hint">Sample path: <code>public/fixtures/ufc-1-200-01-content.json</code></span>
+        <span class="hint">Sample path: <code>public/fixtures/ufc-1-200-01-content.json</code> · air-gap pack: <code>content.json</code> + <code>media/…</code></span>
       </div>
-      <p class="hint">Accepts API wrapper <code>{ statusCode, success, data }</code> or unwrapped <code>{ criterion, sections }</code>. ZIP must contain a <code>.json</code> file.</p>
+      <label class="check-row">
+        <input type="checkbox" id="chk-include-images" ${state.includeImages ? 'checked' : ''} />
+        Include images when syncing / importing packs (store blobs in IndexedDB)
+      </label>
+      <p class="hint">Accepts API wrapper <code>{ statusCode, success, data }</code> or unwrapped <code>{ criterion, sections }</code>. ZIP may include <code>media/</code> (relative paths like <code>ces/…/images/foo.png</code>) for offline IMAGE rendering. UFC 1-200-01 sample has 0 IMAGES — use the image demo pack to try blob URLs + “not in pack”.</p>
     </section>
 
     <section class="panel">
@@ -202,7 +233,7 @@ function renderLibrary() {
         <input id="sync-version" type="text" value="${SAMPLE_VERSION_ID}" aria-label="versionId" placeholder="versionId UUID" />
         <button type="button" id="btn-sync">Try sync version</button>
       </div>
-      <p class="hint">Sync calls <code>GET /v1/versions/{id}/content</code>. No proxy — on CORS failure, import a JSON/ZIP export instead.</p>
+      <p class="hint">Sync prefers <code>GET /v1/versions/{id}/content</code> then optional <code>GET /v1/storage/files/{path}</code> per IMAGE (not the export zip). No proxy — on CORS failure, import a JSON/ZIP pack with <code>media/</code> instead.</p>
     </section>
 
     <section class="panel">
@@ -268,6 +299,29 @@ function bindLibrary() {
       await refreshLibrary();
       setStatus(`Imported ${rec.designation} (${rec.versionId})`);
       renderLibrary();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+      renderLibrary();
+    }
+  });
+
+  document.getElementById('btn-image-demo')?.addEventListener('click', async () => {
+    try {
+      if (location.protocol === 'file:') {
+        setStatus(
+          'Opened from disk (file://): use Choose .json or .zip and pick fixtures/image-demo-pack.zip.',
+          true
+        );
+        renderLibrary();
+        return;
+      }
+      setStatus('Fetching image demo pack…');
+      renderLibrary();
+      const res = await fetch(IMAGE_DEMO_PACK);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const file = new File([blob], 'image-demo-pack.zip', { type: 'application/zip' });
+      await doImport(file);
     } catch (err) {
       setStatus(err.message || String(err), true);
       renderLibrary();
@@ -386,6 +440,7 @@ function bindLibrary() {
       state.noteDraft = null;
       setStatus('');
       await refreshNotes();
+      await refreshMediaStats();
       renderReader();
     });
   });
@@ -393,12 +448,22 @@ function bindLibrary() {
   app.querySelectorAll('[data-delete]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.getAttribute('data-delete');
-      if (!confirm('Remove this document from IndexedDB?')) return;
+      if (!confirm('Remove this document (and its stored images) from IndexedDB?')) return;
+      revokeObjectUrlsForVersion(id);
       await deleteDoc(id);
+      try {
+        await deleteMediaForVersion(id);
+      } catch {
+        /* ignore */
+      }
       await refreshLibrary();
       setStatus('Removed from library');
       renderLibrary();
     });
+  });
+
+  document.getElementById('chk-include-images')?.addEventListener('change', (e) => {
+    state.includeImages = !!e.target.checked;
   });
 }
 
@@ -409,8 +474,39 @@ async function doSyncVersion(vid) {
   if (result.ok) {
     try {
       const rec = await saveDoc(result.data, 'api-sync');
+      let imgMsg = '';
+      if (state.includeImages) {
+        const sections = rec.content?.sections || [];
+        const assets = collectImageAssets(sections);
+        if (assets.length) {
+          setStatus(`Synced ${rec.designation} — fetching images 0/${assets.length}…`);
+          renderLibrary();
+          const imgResult = await syncImagesForContent(rec.versionId, sections, {
+            skipExisting: true,
+            onProgress: (done, total, path) => {
+              if (total && done < total) {
+                setStatus(
+                  `Synced ${rec.designation} — images ${done}/${total}${path ? `: ${path.split('/').pop()}` : ''}`
+                );
+                // avoid full re-render thrash: update flash only
+                const flash = app.querySelector('.flash');
+                if (flash) flash.textContent = state.status;
+              }
+            },
+          });
+          if (imgResult.corsBlocked) {
+            imgMsg = ` · images blocked by CORS (${imgResult.failed}/${imgResult.total}) — import a media pack`;
+          } else if (imgResult.failed) {
+            imgMsg = ` · images ${imgResult.saved} saved, ${imgResult.failed} failed`;
+          } else {
+            imgMsg = ` · ${imgResult.saved} image(s) stored`;
+          }
+        } else {
+          imgMsg = ' · no IMAGE assets in content';
+        }
+      }
       await refreshLibrary();
-      setStatus(`Synced ${rec.designation} from API`);
+      setStatus(`Synced ${rec.designation} from API${imgMsg}`);
     } catch (err) {
       setStatus('API OK but save failed: ' + (err.message || err), true);
     }
@@ -424,9 +520,29 @@ async function doImport(file) {
   try {
     setStatus(`Importing ${file.name}…`);
     renderLibrary();
-    const rec = await importFile(file);
+    const rec = await importFile(file, {
+      includeMedia: state.includeImages,
+      onProgress: (msg) => {
+        setStatus(msg);
+        const flash = app.querySelector('.flash');
+        if (flash) flash.textContent = state.status;
+      },
+    });
     await refreshLibrary();
-    setStatus(`Imported ${rec.designation} — ${rec.title}`);
+    if (rec.mediaOnly) {
+      setStatus(
+        `Media pack: stored ${rec.mediaStats?.saved || 0} image(s) for ${rec.versionId}`
+      );
+    } else {
+      const ms = rec.mediaStats;
+      const imgBit =
+        ms && ms.saved
+          ? ` · ${ms.saved} image(s) from pack`
+          : state.includeImages
+            ? ''
+            : '';
+      setStatus(`Imported ${rec.designation} — ${rec.title}${imgBit}`);
+    }
     renderLibrary();
   } catch (err) {
     setStatus(err.message || String(err), true);
@@ -436,11 +552,22 @@ async function doImport(file) {
 
 function readerActionLinks(versionId) {
   const live = liveVersionUrl(versionId);
+  const ms = state.mediaStats;
+  const mediaHint = ms
+    ? `<p class="hint media-stat-hint">Images in IndexedDB: <strong>${ms.local}</strong> / ${ms.total} referenced</p>`
+    : '';
   return `
     <div class="live-links">
       <a class="link-btn primary" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
+      <button type="button" class="secondary" id="btn-export-pack" title="JSON + media/ for air-gap">Export pack</button>
+      <button type="button" class="secondary" id="btn-fetch-images" title="GET /v1/storage/files/… when CORS allows">Fetch images</button>
+      <label class="file-btn secondary-file">
+        Import media pack…
+        <input type="file" id="media-pack-input" accept=".zip,application/zip" hidden />
+      </label>
     </div>
-    <p class="write-hint">Formal change requests and other writes happen on the live CIM site. Local notes stay in this browser and do not sync to CIM. See docs/CCR-PLAN.md.</p>`;
+    ${mediaHint}
+    <p class="write-hint">Formal change requests and other writes happen on the live CIM site. Local notes stay in this browser and do not sync to CIM. See docs/CCR-PLAN.md. Offline images use blob: URLs from IndexedDB — never hot-linked when offline.</p>`;
 }
 
 function renderNotesPanel() {
@@ -723,14 +850,92 @@ function renderReader() {
 
   document.getElementById('btn-back')?.addEventListener('click', async () => {
     disconnectTocSpy();
+    if (state.current?.versionId) revokeObjectUrlsForVersion(state.current.versionId);
     state.view = 'library';
     state.current = null;
     state.readerMode = 'document';
     state.notes = [];
     state.noteCounts = {};
     state.noteDraft = null;
+    state.mediaStats = null;
     await refreshLibrary();
     renderLibrary();
+  });
+
+  document.getElementById('btn-export-pack')?.addEventListener('click', async () => {
+    try {
+      setStatus('Building pack (JSON + media)…');
+      const pack = await buildMediaPackZip(state.current, { includeMedia: true });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(pack.blob);
+      a.download = pack.filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setStatus(
+        `Exported ${pack.filename}: ${pack.imageIncluded}/${pack.imageTotal} image(s) included` +
+          (pack.imageMissing.length ? ` (${pack.imageMissing.length} missing from IndexedDB)` : '')
+      );
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+    renderReader();
+  });
+
+  document.getElementById('btn-fetch-images')?.addEventListener('click', async () => {
+    const doc = state.current;
+    if (!doc) return;
+    const versionId = doc.versionId || doc.content?.criterion?.versionId;
+    const sections = doc.content?.sections || [];
+    const assets = collectImageAssets(sections);
+    if (!assets.length) {
+      setStatus('This document has no IMAGE mediaAssets (UFC 1-200-01 sample has none).');
+      renderReader();
+      return;
+    }
+    setStatus(`Fetching images 0/${assets.length}…`);
+    renderReader();
+    const result = await syncImagesForContent(versionId, sections, {
+      skipExisting: true,
+      onProgress: (done, total, path) => {
+        if (done < total) {
+          setStatus(`Fetching images ${done}/${total}${path ? `: ${path.split('/').pop()}` : ''}`);
+          const flash = app.querySelector('.flash');
+          if (flash) flash.textContent = state.status;
+        }
+      },
+    });
+    await refreshMediaStats();
+    if (result.corsBlocked) {
+      setStatus(
+        `CORS blocked storage fetches (${result.failed}/${result.total}). Import a media pack ZIP with media/… instead.`,
+        true
+      );
+    } else {
+      setStatus(
+        `Images: ${result.saved} saved, ${result.skipped} already local, ${result.failed} failed (${result.total} total)`
+      );
+    }
+    renderReader();
+  });
+
+  document.getElementById('media-pack-input')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const doc = state.current;
+    if (!doc) return;
+    try {
+      const versionId = doc.versionId || doc.content?.criterion?.versionId;
+      setStatus(`Importing media pack ${file.name}…`);
+      renderReader();
+      const result = await importMediaPackFile(versionId, file, doc.content?.sections || []);
+      await refreshMediaStats();
+      setStatus(`Media pack: stored ${result.saved} image(s)`);
+      renderReader();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+      renderReader();
+    }
   });
 
   app.querySelectorAll('[data-mode]').forEach((btn) => {
@@ -799,6 +1004,16 @@ function renderReader() {
       state._jumpTo = null;
       requestAnimationFrame(() => {
         document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+    // Offline IMAGE hydrate: blob: object URLs from IndexedDB (never hot-link API)
+    const versionId = c.versionId;
+    const bodyEl = app.querySelector('.doc-body');
+    if (bodyEl) {
+      hydrateDocumentImages(bodyEl, versionId).then((r) => {
+        if (r.missing || r.hydrated) {
+          /* keep quiet unless useful */
+        }
       });
     }
   }

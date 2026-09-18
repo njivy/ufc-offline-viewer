@@ -1,0 +1,78 @@
+{
+  "statusCode": 200,
+  "success": true,
+  "message": "ufc-offline-viewer image demo",
+  "data": {
+    "criterion": {
+      "criterionId": "00000000-demo-4000-8000-criterion0001",
+      "versionId": "00000000-demo-4000-8000-imagepack0001",
+      "designation": "UFC DEMO-IMG",
+      "title": "Offline image rendering demo",
+      "versionNumber": "0.5.0-demo",
+      "datePublished": "2026-09-18T00:00:00.000Z",
+      "criterionStatus": "DEMO",
+      "isCurrent": true
+    },
+    "metadataFields": [],
+    "sections": [
+      {
+        "id": "sec-demo-ch1",
+        "type": "CHAPTER",
+        "label": "1",
+        "heading": "Image demo chapter",
+        "children": [
+          {
+            "id": "sec-demo-img-present",
+            "type": "TEXT",
+            "label": "1-1",
+            "heading": "Image present in pack",
+            "sentences": [
+              {
+                "id": "s-demo-1",
+                "text": "This figure should render from an IndexedDB blob after you import the image demo pack ZIP."
+              }
+            ],
+            "mediaAsset": {
+              "id": "media-demo-1",
+              "type": "IMAGE",
+              "sourcePath": "demo/images/sample-figure.png",
+              "url": "demo/images/sample-figure.png",
+              "contentType": "image/png",
+              "content": null,
+              "width": 160,
+              "height": 100,
+              "caption": "Figure 1 \u2014 Sample figure included in media pack",
+              "altText": "Blue checker demo image"
+            },
+            "children": []
+          },
+          {
+            "id": "sec-demo-img-missing",
+            "type": "TEXT",
+            "label": "1-2",
+            "heading": "Image missing from pack",
+            "sentences": [
+              {
+                "id": "s-demo-2",
+                "text": "This IMAGE path is intentionally absent from the pack \u2014 you should see a clear Image not in pack placeholder."
+              }
+            ],
+            "mediaAsset": {
+              "id": "media-demo-2",
+              "type": "IMAGE",
+              "sourcePath": "demo/images/intentionally-missing.png",
+              "url": "demo/images/intentionally-missing.png",
+              "contentType": "image/png",
+              "content": null,
+              "width": null,
+              "height": null,
+              "caption": "Figure 2 \u2014 Missing on purpose",
+              "altText": "Missing image"
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+}

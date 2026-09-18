@@ -1,14 +1,15 @@
 /** IndexedDB helpers for UFC offline docs. Store: ufc-offline / docs keyed by versionId */
 
 const DB_NAME = 'ufc-offline';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'docs';
+const MEDIA_STORE = 'media';
 
 export function openDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
-    req.onupgradeneeded = (ev) => {
+    req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         const os = db.createObjectStore(STORE, { keyPath: 'versionId' });
@@ -19,6 +20,12 @@ export function openDb() {
         const ns = db.createObjectStore('notes', { keyPath: 'id' });
         ns.createIndex('versionId', 'versionId', { unique: false });
         ns.createIndex('target', ['versionId', 'targetType', 'targetId'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains(MEDIA_STORE)) {
+        const ms = db.createObjectStore(MEDIA_STORE, { keyPath: 'key' });
+        ms.createIndex('versionId', 'versionId', { unique: false });
+        ms.createIndex('path', 'path', { unique: false });
+        ms.createIndex('versionPath', ['versionId', 'path'], { unique: true });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -114,3 +121,5 @@ export async function deleteDoc(versionId) {
   await txDone(tx);
   db.close();
 }
+
+export { DB_VERSION, MEDIA_STORE };

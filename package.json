@@ -1,6 +1,6 @@
 {
   "name": "ufc-offline-viewer",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,5 +14,5 @@
   "dependencies": {
     "jszip": "^3.10.2"
   },
-  "description": "Offline static viewer for UFC / CIM content JSON (IndexedDB + import)"
+  "description": "Offline static viewer for UFC / CIM content JSON (IndexedDB + import + offline images)"
 }

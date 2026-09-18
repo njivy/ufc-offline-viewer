@@ -117,6 +117,29 @@ export function renderSentences(sentences, noteCounts = null, sectionId = '') {
     .join(' ');
 }
 
+function normalizePathForAttr(urlOrPath) {
+  if (!urlOrPath || typeof urlOrPath !== 'string') return '';
+  let p = urlOrPath.trim();
+  const prefixes = [
+    'https://api.digital.wbdg.org/v1/storage/files/',
+    'http://api.digital.wbdg.org/v1/storage/files/',
+    '/v1/storage/files/',
+    'v1/storage/files/',
+  ];
+  for (const pre of prefixes) {
+    if (p.toLowerCase().startsWith(pre.toLowerCase())) {
+      p = p.slice(pre.length);
+      break;
+    }
+  }
+  try {
+    p = decodeURIComponent(p);
+  } catch {
+    /* keep */
+  }
+  return p.replace(/^\/+/, '');
+}
+
 function renderMedia(media) {
   if (!media) return '';
   if (media.type === 'TABLE' && media.content) {
@@ -126,12 +149,18 @@ function renderMedia(media) {
     return `<figure class="media-table">${cap}<div class="table-wrap">${sanitizeTableHtml(media.content)}</div></figure>`;
   }
   if (media.type === 'IMAGE') {
-    const cap = media.caption || media.altText || 'Image';
-    return `<figure class="media-image"><p class="muted">Image (offline): ${escapeHtml(cap)}${
-      media.url || media.sourcePath
-        ? ` — path <code>${escapeHtml(media.url || media.sourcePath)}</code>`
-        : ''
-    }</p></figure>`;
+    const path = normalizePathForAttr(media.url || media.sourcePath || '');
+    const cap = media.caption || '';
+    const alt = media.altText || media.caption || 'Image';
+    const capHtml = cap ? `<figcaption>${escapeHtml(cap)}</figcaption>` : '';
+    // Placeholder until hydrateDocumentImages swaps in blob: object URL (never hot-link API offline).
+    return `<figure class="media-image media-missing" data-media-path="${escapeHtml(path)}" data-media-alt="${escapeHtml(alt)}" data-media-caption="${escapeHtml(cap)}">
+      ${capHtml}
+      <div class="media-placeholder">
+        <p class="media-missing-msg">Image not in pack</p>
+        ${path ? `<p class="muted media-path"><code>${escapeHtml(path)}</code></p>` : '<p class="muted">No storage path on mediaAsset</p>'}
+      </div>
+    </figure>`;
   }
   return '';
 }

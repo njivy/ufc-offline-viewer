@@ -56,7 +56,7 @@ See [IMPORT.md](./IMPORT.md) for export sources and zip notes.
 
 - Vite + vanilla JS
 - JSZip (zip imports)
-- IndexedDB database `ufc-offline`: store `docs` (key `versionId`) + store `notes` (local commentary)
+- IndexedDB database `ufc-offline` (v3): store `docs` (key `versionId`) + `notes` (local commentary) + `media` (IMAGE blobs keyed by versionId + path)
 
 ## Repo
 
@@ -73,6 +73,17 @@ Offline-only notes tagged to sections or sentences. They live in IndexedDB and *
 5. Reload the page, re-open the document — notes persist locally.
 
 Formal CCR / writes: **Open on live site** only. Plan: [docs/CCR-PLAN.md](./docs/CCR-PLAN.md) (approved: link-out only; no in-app CCR).
+
+## Offline images (v0.5)
+
+UFC content references figures via `mediaAsset` (`type: IMAGE`, relative `url` / `sourcePath` like `ces/…/images/foo.png`). Tables stay inline HTML; images are separate binaries.
+
+1. Import a **media pack** ZIP (`content.json` + `media/…`) or sync with **Include images** when CORS allows storage GETs.
+2. Open the document — figures hydrate from IndexedDB as `blob:` URLs (never hot-linked offline).
+3. Missing files show **Image not in pack** plus the storage path.
+4. Reader actions: **Fetch images**, **Import media pack…**, **Export pack** (JSON + media for air-gap).
+
+Try: import `public/fixtures/image-demo-pack.zip` — one figure renders, one intentionally missing. UFC 1-200-01 sample still has **0 IMAGES**.
 
 ## Online directory & asOf sync (v0.4)
 
