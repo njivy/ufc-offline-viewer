@@ -1,8 +1,17 @@
 import './style.css';
 import { listDocs, getDoc, deleteDoc, saveDoc } from './db.js';
 import { importFile, importFromUrl } from './import.js';
-import { walkToc, renderDocumentBody, searchDocument, escapeHtml, flattenRequirements, requirementsToCsv } from './render.js';
-import { trySyncFromApi, liveVersionUrl } from './api.js';
+import {
+  walkToc,
+  renderDocumentBody,
+  searchDocument,
+  escapeHtml,
+  flattenRequirements,
+  requirementsToCsv,
+  renderDocMetaPanel,
+} from './render.js';
+import { trySyncFromApi, liveVersionUrl, liveCcrUrl, ccrHubUrl } from './api.js';
+import { listNotesForVersion, countNotesByTarget, saveNote, deleteNote } from './notes.js';
 
 const FIXTURE = '/fixtures/ufc-1-200-01-content.json';
 const SAMPLE_VERSION_ID = 'a093a449-9220-45e0-866a-67d3139af067';
@@ -18,10 +27,28 @@ let state = {
   readerMode: 'document', // document | table
   tableFilter: '',
   tableTypeFilter: 'all', // all | TEXT | HEADING | CHAPTER | notes
+  notes: [],
+  noteCounts: {},
+  noteDraft: null, // { targetType, targetId, noteId?, body }
+  notesPanelOpen: true,
 };
+
+let tocObserver = null;
 
 async function refreshLibrary() {
   state.docs = await listDocs();
+}
+
+async function refreshNotes() {
+  const doc = state.current;
+  if (!doc) {
+    state.notes = [];
+    state.noteCounts = {};
+    return;
+  }
+  const versionId = doc.versionId || doc.content?.criterion?.versionId;
+  state.notes = await listNotesForVersion(versionId);
+  state.noteCounts = await countNotesByTarget(versionId);
 }
 
 function setStatus(msg, isError = false) {
@@ -206,7 +233,9 @@ function bindLibrary() {
       state.view = 'reader';
       state.current = doc;
       state.searchHits = [];
+      state.noteDraft = null;
       setStatus('');
+      await refreshNotes();
       renderReader();
     });
   });
@@ -237,6 +266,108 @@ async function doImport(file) {
   }
 }
 
+function readerActionLinks(versionId) {
+  const live = liveVersionUrl(versionId);
+  const ccr = liveCcrUrl(versionId);
+  const hub = ccrHubUrl();
+  return `
+    <div class="live-links">
+      <a class="link-btn primary" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
+      <a class="link-btn" href="${escapeHtml(ccr)}" target="_blank" rel="noopener noreferrer">Criteria Change Request</a>
+      <a class="link-btn subtle" href="${escapeHtml(hub)}" target="_blank" rel="noopener noreferrer">CCR hub</a>
+    </div>
+    <p class="write-hint">Writes happen on the live site only. Local notes stay in this browser and do not sync to CIM.</p>`;
+}
+
+function renderNotesPanel() {
+  const notes = state.notes || [];
+  const open = state.notesPanelOpen !== false;
+  const list = notes.length
+    ? notes
+        .map((n) => {
+          const preview = n.body.length > 120 ? `${escapeHtml(n.body.slice(0, 120))}…` : escapeHtml(n.body);
+          return `<li class="note-item" data-jump-note="${escapeHtml(n.targetType)}" data-jump-id="${escapeHtml(n.targetId)}">
+            <button type="button" class="note-jump" data-jump-note="${escapeHtml(n.targetType)}" data-jump-id="${escapeHtml(n.targetId)}">
+              <span class="note-target-label">${escapeHtml(n.targetType)} · ${escapeHtml(n.targetId.slice(0, 8))}…</span>
+              <span class="note-preview">${preview}</span>
+              <span class="note-when muted">${escapeHtml(formatDate(n.updatedAt))}</span>
+            </button>
+            <div class="note-item-actions">
+              <button type="button" class="secondary" data-edit-note="${escapeHtml(n.id)}">Edit</button>
+              <button type="button" class="secondary" data-del-note="${escapeHtml(n.id)}">Delete</button>
+            </div>
+          </li>`;
+        })
+        .join('')
+    : `<li class="empty muted">No local notes for this version yet. Use <strong>Note</strong> on a section or the ✉ control on a sentence.</li>`;
+
+  return `
+    <aside class="notes-panel ${open ? 'open' : 'collapsed'}" aria-label="Local commentary">
+      <div class="notes-panel-head">
+        <h2>Local notes <span class="note-count-pill">${notes.length}</span></h2>
+        <button type="button" class="secondary" id="btn-toggle-notes" aria-expanded="${open}">${open ? 'Hide' : 'Show'}</button>
+      </div>
+      <p class="hint notes-offline-hint">Offline-only · stored in IndexedDB · never syncs to CIM</p>
+      <ul class="notes-list" ${open ? '' : 'hidden'}>${list}</ul>
+    </aside>`;
+}
+
+function renderNoteModal() {
+  const d = state.noteDraft;
+  if (!d) return '';
+  const editing = !!d.noteId;
+  return `
+    <div class="modal-backdrop" id="note-modal" role="dialog" aria-modal="true" aria-labelledby="note-modal-title">
+      <div class="modal">
+        <h2 id="note-modal-title">${editing ? 'Edit' : 'Add'} local note</h2>
+        <p class="muted">Target: <strong>${escapeHtml(d.targetType)}</strong> <code class="mono">${escapeHtml(d.targetId)}</code></p>
+        <label class="sr-only" for="note-body">Note text</label>
+        <textarea id="note-body" rows="6" placeholder="Your offline commentary…">${escapeHtml(d.body || '')}</textarea>
+        <div class="modal-actions">
+          <button type="button" id="note-save">Save</button>
+          <button type="button" class="secondary" id="note-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function disconnectTocSpy() {
+  if (tocObserver) {
+    tocObserver.disconnect();
+    tocObserver = null;
+  }
+}
+
+function setupTocScrollSpy() {
+  disconnectTocSpy();
+  const links = [...app.querySelectorAll('.toc nav a[href^="#sec-"]')];
+  if (!links.length) return;
+  const byId = new Map();
+  for (const a of links) {
+    const id = a.getAttribute('href')?.slice(1);
+    if (id) byId.set(id, a);
+  }
+  const sections = [...app.querySelectorAll('.doc-body .sec[id^="sec-"]')].filter((el) =>
+    byId.has(el.id)
+  );
+  if (!sections.length) return;
+
+  const setActive = (id) => {
+    links.forEach((a) => a.classList.toggle('active', a.getAttribute('href') === `#${id}`));
+  };
+
+  tocObserver = new IntersectionObserver(
+    (entries) => {
+      const visible = entries
+        .filter((e) => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (visible[0]) setActive(visible[0].target.id);
+    },
+    { rootMargin: '-20% 0px -55% 0px', threshold: [0, 0.1, 0.5] }
+  );
+  sections.forEach((el) => tocObserver.observe(el));
+}
+
 function renderReader() {
   const doc = state.current;
   if (!doc) {
@@ -246,7 +377,7 @@ function renderReader() {
   }
   const c = doc.content.criterion;
   const sections = doc.content.sections || [];
-  const live = liveVersionUrl(c.versionId);
+  const versionId = c.versionId;
   const docMeta = {
     designation: c.designation || '',
     title: c.title || '',
@@ -256,6 +387,11 @@ function renderReader() {
   };
   const allRows = flattenRequirements(sections, docMeta);
   const mode = state.readerMode || 'document';
+  const metaPanel = renderDocMetaPanel(c, doc.content, {
+    importedAt: doc.importedAt,
+    source: doc.source,
+    requirementCount: allRows.length,
+  });
 
   const modeToggle = `
     <div class="mode-toggle" role="tablist" aria-label="Reader mode">
@@ -274,17 +410,13 @@ function renderReader() {
           · <code class="mono">${escapeHtml(c.versionId)}</code>
           ${c.datePublished ? ` · published ${escapeHtml(formatDate(c.datePublished))}` : ''}
         </p>
-        <dl class="doc-meta">
-          <div><dt>Status</dt><dd>${escapeHtml(c.criterionStatus || '—')}</dd></div>
-          <div><dt>Current</dt><dd>${c.isCurrent ? 'Yes' : 'No'}</dd></div>
-          <div><dt>Requirements rows</dt><dd>${allRows.length}</dd></div>
-        </dl>
       </div>
       <div class="reader-actions">
         ${modeToggle}
-        <a class="link-btn primary" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
+        ${readerActionLinks(versionId)}
       </div>
-    </header>`;
+    </header>
+    ${metaPanel}`;
 
   let mainHtml = '';
   if (mode === 'table') {
@@ -309,8 +441,10 @@ function renderReader() {
       ? rows
           .map((r) => {
             const text = r.text.length > 280 ? `${escapeHtml(r.text.slice(0, 280))}…` : escapeHtml(r.text);
-            const notes = [r.commentary && `<div class="note"><strong>Commentary:</strong> ${escapeHtml(r.commentary)}</div>`,
-                           r.explanation && `<div class="note"><strong>Explanation:</strong> ${escapeHtml(r.explanation)}</div>`]
+            const notes = [
+              r.commentary && `<div class="note"><strong>Commentary:</strong> ${escapeHtml(r.commentary)}</div>`,
+              r.explanation && `<div class="note"><strong>Explanation:</strong> ${escapeHtml(r.explanation)}</div>`,
+            ]
               .filter(Boolean)
               .join('');
             return `<tr data-sec="${escapeHtml(r.id)}">
@@ -327,40 +461,43 @@ function renderReader() {
       : `<tr><td colspan="7" class="empty">No rows match this filter.</td></tr>`;
 
     mainHtml = `
-      <section class="panel table-panel">
-        <div class="table-toolbar">
-          <input type="search" id="table-filter" placeholder="Filter requirements…" value="${escapeHtml(state.tableFilter || '')}" />
-          <select id="table-type">
-            <option value="all"${typeF === 'all' ? ' selected' : ''}>All types</option>
-            <option value="TEXT"${typeF === 'TEXT' ? ' selected' : ''}>TEXT</option>
-            <option value="HEADING"${typeF === 'HEADING' ? ' selected' : ''}>HEADING</option>
-            <option value="CHAPTER"${typeF === 'CHAPTER' ? ' selected' : ''}>CHAPTER</option>
-            <option value="notes"${typeF === 'notes' ? ' selected' : ''}>Has commentary/explanation</option>
-          </select>
-          <span class="muted">${rows.length} / ${allRows.length} rows</span>
-          <button type="button" id="btn-csv" class="secondary">Export CSV</button>
-        </div>
-        <p class="hint">Tabular view for project review — filter, then export CSV. “View” switches to Document and jumps to that section. Document-level metadataFields are shown when present in the import (this sample has none).</p>
-        <div class="table-scroll req-table-wrap">
-          <table class="req-table">
-            <thead>
-              <tr>
-                <th>Section path</th>
-                <th>Label</th>
-                <th>Heading</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Requirement / notes</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>${bodyRows}</tbody>
-          </table>
-        </div>
-      </section>`;
+      <div class="reader-with-notes">
+        <section class="panel table-panel">
+          <div class="table-toolbar">
+            <input type="search" id="table-filter" placeholder="Filter requirements…" value="${escapeHtml(state.tableFilter || '')}" />
+            <select id="table-type">
+              <option value="all"${typeF === 'all' ? ' selected' : ''}>All types</option>
+              <option value="TEXT"${typeF === 'TEXT' ? ' selected' : ''}>TEXT</option>
+              <option value="HEADING"${typeF === 'HEADING' ? ' selected' : ''}>HEADING</option>
+              <option value="CHAPTER"${typeF === 'CHAPTER' ? ' selected' : ''}>CHAPTER</option>
+              <option value="notes"${typeF === 'notes' ? ' selected' : ''}>Has commentary/explanation</option>
+            </select>
+            <span class="muted">${rows.length} / ${allRows.length} rows</span>
+            <button type="button" id="btn-csv" class="secondary">Export CSV</button>
+          </div>
+          <p class="hint">Tabular view for project review — filter, then export CSV. “View” switches to Document and jumps to that section.</p>
+          <div class="table-scroll req-table-wrap">
+            <table class="req-table">
+              <thead>
+                <tr>
+                  <th>Section path</th>
+                  <th>Label</th>
+                  <th>Heading</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Requirement / notes</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>${bodyRows}</tbody>
+            </table>
+          </div>
+        </section>
+        ${renderNotesPanel()}
+      </div>`;
   } else {
     const toc = walkToc(sections);
-    const body = renderDocumentBody(sections);
+    const body = renderDocumentBody(sections, state.noteCounts);
     const hitsHtml = state.searchHits.length
       ? `<ul class="hits">${state.searchHits
           .map(
@@ -375,14 +512,22 @@ function renderReader() {
     mainHtml = `
       <div class="reader-layout">
         <aside class="toc">
-          <h2>Contents</h2>
-          <nav>
+          <div class="toc-chrome">
+            <h2>Contents</h2>
+          </div>
+          <nav aria-label="Table of contents">
             <ul>
               ${toc
-                .map(
-                  (t) =>
-                    `<li class="d${t.depth}"><a href="#sec-${escapeHtml(t.id)}">${escapeHtml(t.title)}</a></li>`
-                )
+                .map((t) => {
+                  const depthClass = `d${Math.min(t.depth, 4)}`;
+                  const typeClass =
+                    t.type === 'CHAPTER' || t.type === 'APPENDIX'
+                      ? 'toc-chapter'
+                      : t.depth >= 2
+                        ? 'toc-deep'
+                        : 'toc-heading';
+                  return `<li class="${depthClass} ${typeClass}"><a href="#sec-${escapeHtml(t.id)}">${escapeHtml(t.title)}</a></li>`;
+                })
                 .join('')}
             </ul>
           </nav>
@@ -398,15 +543,21 @@ function renderReader() {
         <main class="doc-body">
           ${body}
         </main>
+        ${renderNotesPanel()}
       </div>`;
   }
 
-  app.innerHTML = `${header}${mainHtml}${statusBlock()}`;
+  disconnectTocSpy();
+  app.innerHTML = `${header}${mainHtml}${renderNoteModal()}${statusBlock()}`;
 
   document.getElementById('btn-back')?.addEventListener('click', async () => {
+    disconnectTocSpy();
     state.view = 'library';
     state.current = null;
     state.readerMode = 'document';
+    state.notes = [];
+    state.noteCounts = {};
+    state.noteDraft = null;
     await refreshLibrary();
     renderLibrary();
   });
@@ -417,6 +568,8 @@ function renderReader() {
       renderReader();
     });
   });
+
+  bindNotesUi();
 
   if (mode === 'table') {
     const filterEl = document.getElementById('table-filter');
@@ -443,15 +596,10 @@ function renderReader() {
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `${(c.designation || 'ufc').replace(/\\s+/g, '-')}-requirements.csv`;
+      a.download = `${(c.designation || 'ufc').replace(/\s+/g, '-')}-requirements.csv`;
       a.click();
       URL.revokeObjectURL(a.href);
       setStatus(`Exported ${allRows.length} rows to CSV`);
-      // keep table visible; flash only
-      const flash = statusBlock();
-      if (flash) {
-        /* status shown on next full render — soft update */
-      }
     });
     app.querySelectorAll('[data-jump]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -474,6 +622,7 @@ function renderReader() {
         input.focus();
       }
     });
+    setupTocScrollSpy();
     if (state._jumpTo) {
       const id = state._jumpTo;
       state._jumpTo = null;
@@ -481,6 +630,134 @@ function renderReader() {
         document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     }
+  }
+}
+
+function bindNotesUi() {
+  document.getElementById('btn-toggle-notes')?.addEventListener('click', () => {
+    state.notesPanelOpen = !state.notesPanelOpen;
+    renderReader();
+  });
+
+  const openDraft = (targetType, targetId, existing) => {
+    state.noteDraft = {
+      targetType,
+      targetId,
+      noteId: existing?.id || null,
+      body: existing?.body || '',
+      createdAt: existing?.createdAt,
+    };
+    renderReader();
+    requestAnimationFrame(() => document.getElementById('note-body')?.focus());
+  };
+
+  app.querySelectorAll('[data-note-target]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const targetType = btn.getAttribute('data-note-target');
+      const targetId = btn.getAttribute('data-note-id');
+      if (!targetType || !targetId) return;
+      const existing = (state.notes || []).find(
+        (n) => n.targetType === targetType && n.targetId === targetId
+      );
+      openDraft(targetType, targetId, existing || null);
+    });
+  });
+
+  app.querySelectorAll('[data-edit-note]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-edit-note');
+      const n = (state.notes || []).find((x) => x.id === id);
+      if (n) openDraft(n.targetType, n.targetId, n);
+    });
+  });
+
+  app.querySelectorAll('[data-del-note]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-del-note');
+      if (!confirm('Delete this local note?')) return;
+      await deleteNote(id);
+      await refreshNotes();
+      setStatus('Note deleted');
+      renderReader();
+    });
+  });
+
+  app.querySelectorAll('[data-jump-note]').forEach((el) => {
+    if (el.tagName === 'LI') return;
+    el.addEventListener('click', () => {
+      const type = el.getAttribute('data-jump-note');
+      const id = el.getAttribute('data-jump-id');
+      if (state.readerMode !== 'document') {
+        state.readerMode = 'document';
+        state._jumpTo = type === 'section' ? id : null;
+        state._jumpSentence = type === 'sentence' ? id : null;
+        renderReader();
+        return;
+      }
+      jumpToNoteTarget(type, id);
+    });
+  });
+
+  document.getElementById('note-cancel')?.addEventListener('click', () => {
+    state.noteDraft = null;
+    renderReader();
+  });
+
+  document.getElementById('note-save')?.addEventListener('click', async () => {
+    const body = document.getElementById('note-body')?.value || '';
+    const d = state.noteDraft;
+    if (!d) return;
+    try {
+      const versionId = state.current?.versionId || state.current?.content?.criterion?.versionId;
+      await saveNote({
+        id: d.noteId || undefined,
+        versionId,
+        targetType: d.targetType,
+        targetId: d.targetId,
+        body,
+        createdAt: d.createdAt,
+      });
+      state.noteDraft = null;
+      await refreshNotes();
+      setStatus('Note saved (local only)');
+      renderReader();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+      renderReader();
+    }
+  });
+
+  document.getElementById('note-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'note-modal') {
+      state.noteDraft = null;
+      renderReader();
+    }
+  });
+
+  if (state._jumpSentence) {
+    const sid = state._jumpSentence;
+    state._jumpSentence = null;
+    requestAnimationFrame(() => {
+      const el = app.querySelector(`.sentence[data-sid="${CSS.escape(sid)}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.classList.add('note-flash');
+      setTimeout(() => el?.classList.remove('note-flash'), 1600);
+    });
+  }
+}
+
+function jumpToNoteTarget(type, id) {
+  if (type === 'section') {
+    document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else if (type === 'sentence') {
+    const el = app.querySelector(`.sentence[data-sid="${CSS.escape(id)}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el?.classList.add('note-flash');
+    setTimeout(() => el?.classList.remove('note-flash'), 1600);
   }
 }
 

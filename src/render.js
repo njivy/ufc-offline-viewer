@@ -47,12 +47,72 @@ export function walkToc(sections, depth = 0, out = []) {
   return out;
 }
 
-function renderSentences(sentences) {
+/**
+ * Shared document metadata panel — used in document and table reader modes.
+ * extras: { importedAt, source, requirementCount }
+ */
+export function renderDocMetaPanel(criterion, content, extras = {}) {
+  const c = criterion || {};
+  const fields = content?.metadataFields || [];
+  const rows = [];
+
+  const push = (label, value, opts = {}) => {
+    if (value == null || value === '') return;
+    const display = opts.mono
+      ? `<code class="mono">${escapeHtml(String(value))}</code>`
+      : escapeHtml(String(value));
+    rows.push(`<div class="meta-row"><dt>${escapeHtml(label)}</dt><dd>${display}</dd></div>`);
+  };
+
+  push('Designation', c.designation);
+  push('Title', c.title);
+  push('Version', c.versionNumber);
+  push('versionId', c.versionId, { mono: true });
+  push('Published', formatMetaDate(c.datePublished));
+  push('Status', c.criterionStatus);
+  if (typeof c.isCurrent === 'boolean') {
+    push('Current', c.isCurrent ? 'Yes' : 'No');
+  }
+  if (extras.importedAt) push('Imported', formatMetaDate(extras.importedAt));
+  if (extras.source) push('Source', extras.source);
+  if (extras.requirementCount != null) push('Requirement rows', String(extras.requirementCount));
+
+  for (const f of fields) {
+    const key = f.key || f.name || f.label || f.fieldName;
+    const val = f.value ?? f.fieldValue ?? f.text;
+    if (key && val != null && val !== '') push(String(key), String(val));
+  }
+
+  if (!rows.length) return '';
+
+  return `
+    <section class="meta-panel" aria-label="Document metadata">
+      <h2 class="meta-panel-title">Document metadata</h2>
+      <dl class="meta-grid">${rows.join('')}</dl>
+    </section>`;
+}
+
+function formatMetaDate(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  } catch {
+    return String(iso);
+  }
+}
+
+export function renderSentences(sentences, noteCounts = null, sectionId = '') {
   if (!sentences?.length) return '';
   return sentences
     .map((s) => {
+      const sid = s.id || '';
       const t = (s.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return `<span class="sentence" data-sid="${s.id || ''}">${t}</span>`;
+      const count = noteCounts ? noteCounts[`sentence:${sid}`] || 0 : 0;
+      const badge = count > 0 ? `<span class="note-badge" title="${count} note(s)">${count}</span>` : '';
+      const afford = sid
+        ? `<button type="button" class="note-affordance" data-note-target="sentence" data-note-id="${escapeHtml(sid)}" data-section-id="${escapeHtml(sectionId)}" title="Add local note" aria-label="Annotate sentence">${badge || '✉'}</button>`
+        : '';
+      return `<span class="sentence" data-sid="${escapeHtml(sid)}" data-section-id="${escapeHtml(sectionId)}">${t}${afford}</span>`;
     })
     .join(' ');
 }
@@ -84,7 +144,7 @@ export function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-function renderNode(node) {
+function renderNode(node, noteCounts = null) {
   const title = sectionTitle(node);
   const headingLevel =
     node.type === 'CHAPTER' || node.type === 'APPENDIX'
@@ -99,25 +159,35 @@ function renderNode(node) {
     node.heading ||
     node.label;
 
+  const secCount = noteCounts ? noteCounts[`section:${node.id}`] || 0 : 0;
+  const secBadge = secCount > 0 ? ` <span class="note-badge">${secCount}</span>` : '';
+
   let html = `<section class="sec type-${(node.type || '').toLowerCase()}" id="sec-${node.id}" data-id="${node.id}">`;
   if (showHeading) {
-    html += `<h${headingLevel} class="sec-heading">${escapeHtml(title)}</h${headingLevel}>`;
+    html += `<div class="sec-heading-row">
+      <h${headingLevel} class="sec-heading">${escapeHtml(title)}</h${headingLevel}>
+      <button type="button" class="note-btn" data-note-target="section" data-note-id="${escapeHtml(node.id)}" title="Local note for this section">Note${secBadge}</button>
+    </div>`;
   }
   if (node.sentences?.length) {
-    html += `<div class="sec-body">${renderSentences(node.sentences)}</div>`;
+    html += `<div class="sec-body">${renderSentences(node.sentences, noteCounts, node.id)}</div>`;
   } else if (node.content && node.type === 'TEXT') {
     html += `<div class="sec-body">${escapeHtml(node.content)}</div>`;
   }
   html += renderMedia(node.mediaAsset);
   if (node.children?.length) {
-    html += node.children.map(renderNode).join('');
+    html += node.children.map((child) => renderNode(child, noteCounts)).join('');
   }
   html += '</section>';
   return html;
 }
 
-export function renderDocumentBody(sections) {
-  return (sections || []).map(renderNode).join('');
+/**
+ * @param {Array} sections
+ * @param {Record<string, number>|null} noteCounts map of "section:id" | "sentence:id" → count
+ */
+export function renderDocumentBody(sections, noteCounts = null) {
+  return (sections || []).map((n) => renderNode(n, noteCounts)).join('');
 }
 
 /**

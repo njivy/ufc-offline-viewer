@@ -1,26 +1,31 @@
 /** IndexedDB helpers for UFC offline docs. Store: ufc-offline / docs keyed by versionId */
 
 const DB_NAME = 'ufc-offline';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'docs';
 
-function openDb() {
+export function openDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (ev) => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         const os = db.createObjectStore(STORE, { keyPath: 'versionId' });
         os.createIndex('designation', 'designation', { unique: false });
         os.createIndex('importedAt', 'importedAt', { unique: false });
       }
+      if (!db.objectStoreNames.contains('notes')) {
+        const ns = db.createObjectStore('notes', { keyPath: 'id' });
+        ns.createIndex('versionId', 'versionId', { unique: false });
+        ns.createIndex('target', ['versionId', 'targetType', 'targetId'], { unique: false });
+      }
     };
     req.onsuccess = () => resolve(req.result);
   });
 }
 
-function txDone(tx) {
+export function txDone(tx) {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);

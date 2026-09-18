@@ -6,7 +6,7 @@ Static browser app for **offline reading** of Unified Facilities Criteria (UFC) 
 
 - **Mode A (primary):** Import `.json` or `.zip` (containing JSON) → IndexedDB → fully offline read.
 - **Mode B (stub):** Try `fetch` to `https://api.digital.wbdg.org`; on CORS failure, show Import guidance. **No proxy.**
-- **Writes:** “Open on live site” → `https://digital.wbdg.org/versions/{versionId}` only.
+- **Writes:** “Open on live site” / **Criteria Change Request** link out to digital.wbdg.org. Local notes stay in IndexedDB and never sync.
 
 ## Quick start
 
@@ -56,15 +56,32 @@ See [IMPORT.md](./IMPORT.md) for export sources and zip notes.
 
 - Vite + vanilla JS
 - JSZip (zip imports)
-- IndexedDB database `ufc-offline`, object store `docs`, key `versionId`
+- IndexedDB database `ufc-offline`: store `docs` (key `versionId`) + store `notes` (local commentary)
 
 ## Repo
 
 https://github.com/njivy/ufc-offline-viewer
 
+## Local commentary (v0.3)
+
+Offline-only notes tagged to sections or sentences. They live in IndexedDB and **do not sync** to CIM.
+
+1. Import the sample fixture (or any content JSON) and open the document.
+2. On a section heading, click **Note** (or the subtle ✉ control on a sentence).
+3. Enter text → **Save**. The notes panel lists all notes for this version.
+4. Reload the page, re-open the document — the note is still there.
+5. Click a note in the panel to jump to its target; use Edit / Delete as needed.
+
+CCR / formal writes still happen only on the live site (links in the reader header).
+
+## TOC & metadata (v0.3)
+
+- Polished left Contents nav with depth rail, chapter weight, and scrollspy active state
+- Shared **Document metadata** panel in both Document and Requirements table modes (designation, version, status, importedAt/source, metadataFields)
+
 ## Out of scope (by design)
 
-No backend, no CORS proxy, no local field scripts, no binary desktop app, no editing/CCR inside this app.
+No backend, no CORS proxy, no local field scripts, no binary desktop app, no CIM/CCR writes inside this app (local notes only).
 
 
 ## Open from disk (no web host)

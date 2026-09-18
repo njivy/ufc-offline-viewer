@@ -2,7 +2,24 @@ const API_BASE = 'https://api.digital.wbdg.org';
 const LIVE_BASE = 'https://digital.wbdg.org';
 
 export function liveVersionUrl(versionId) {
-  return `${LIVE_BASE}/versions/${versionId}`;
+  return `${LIVE_BASE}/versions/${encodeURIComponent(versionId)}`;
+}
+
+/** Live Criteria Change Request entry (SPA). Prefer version deep-link when known. */
+export function ccrHubUrl() {
+  return `${LIVE_BASE}/ccr`;
+}
+
+export function liveCcrUrl(versionId, sectionId) {
+  const base = liveVersionUrl(versionId);
+  if (sectionId) {
+    return `${base}?section=${encodeURIComponent(sectionId)}#sec-${encodeURIComponent(sectionId)}`;
+  }
+  return `${base}#ccr`;
+}
+
+export function liveRelatedMaterialUrl(wbdgUrl) {
+  return wbdgUrl || null;
 }
 
 /**
