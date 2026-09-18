@@ -163,3 +163,132 @@ export function searchDocument(sections, query) {
   walk(sections);
   return hits.slice(0, 100);
 }
+
+/**
+ * Flatten section tree into requirement-oriented rows for tabular / project review.
+ * One row per node that carries requirement text, notes, or table media.
+ */
+
+function asPlainText(value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object') {
+          return item.text || item.content || item.value || '';
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  }
+  if (typeof value === 'object') {
+    return String(value.text || value.content || value.value || '').trim();
+  }
+  return String(value).trim();
+}
+
+export function flattenRequirements(sections, docMeta = {}) {
+  const rows = [];
+
+  function nodeText(node) {
+    if (node.sentences?.length) {
+      return node.sentences.map((s) => s.text || '').filter(Boolean).join(' ').trim();
+    }
+    if (node.type === 'TEXT' && node.content) return String(node.content).trim();
+    return '';
+  }
+
+  function walk(nodes, ancestors = []) {
+    for (const node of nodes || []) {
+      const title = sectionTitle(node);
+      const pathParts = [...ancestors];
+      if (title && node.type !== 'TEXT') pathParts.push(title);
+      else if (title && !ancestors.length) pathParts.push(title);
+
+      const text = nodeText(node);
+      const commentary = asPlainText(node.commentary);
+      const explanation = asPlainText(node.explanation);
+      const hasTable = !!(node.mediaAsset && node.mediaAsset.type === 'TABLE');
+      const hasImage = !!(node.mediaAsset && node.mediaAsset.type === 'IMAGE');
+      const isReq =
+        !!text ||
+        !!commentary ||
+        !!explanation ||
+        hasTable ||
+        hasImage ||
+        (node.type === 'TEXT' && (node.label || node.heading));
+
+      if (isReq) {
+        const crumb = ancestors.filter(Boolean);
+        rows.push({
+          id: node.id,
+          designation: docMeta.designation || '',
+          docTitle: docMeta.title || '',
+          versionNumber: docMeta.versionNumber || '',
+          versionId: docMeta.versionId || '',
+          datePublished: docMeta.datePublished || '',
+          path: crumb.join(' › '),
+          label: node.label || '',
+          heading: node.heading || '',
+          type: node.type || '',
+          status: node.status || '',
+          text,
+          commentary,
+          explanation,
+          hasTable,
+          hasImage,
+          mediaCaption: node.mediaAsset?.caption || '',
+        });
+      }
+
+      const nextAncestors =
+        node.type === 'CHAPTER' ||
+        node.type === 'APPENDIX' ||
+        node.type === 'HEADING' ||
+        (node.heading && node.type !== 'TEXT') ||
+        (node.label && node.type !== 'TEXT')
+          ? [...ancestors, title]
+          : ancestors;
+      if (node.children?.length) walk(node.children, nextAncestors);
+    }
+  }
+
+  walk(sections);
+  return rows;
+}
+
+/** Build CSV string from requirement rows (for project spreadsheets). */
+export function requirementsToCsv(rows) {
+  const cols = [
+    'designation',
+    'docTitle',
+    'versionNumber',
+    'versionId',
+    'datePublished',
+    'path',
+    'label',
+    'heading',
+    'type',
+    'status',
+    'text',
+    'commentary',
+    'explanation',
+    'hasTable',
+    'hasImage',
+    'mediaCaption',
+  ];
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lines = [cols.join(',')];
+  for (const r of rows) {
+    lines.push(cols.map((c) => esc(r[c])).join(','));
+  }
+  return lines.join('\r\n');
+}

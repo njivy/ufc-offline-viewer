@@ -96,3 +96,13 @@ Then import `dist/fixtures/ufc-1-200-01-content.json` (or your CIM export JSON/Z
 
 To regenerate after source changes: `npm i && npm run build` (updates `dist/`).
 
+## Requirements table (v0.2)
+
+Open a document, then switch **Document | Requirements table**.
+
+- One row per requirement-bearing node (text, commentary, explanation, or embedded table)
+- Columns: section path, label, heading, type, status, requirement text / notes
+- Filter by keyword or type; export **CSV** for project review spreadsheets
+- Document metadata strip shows designation status / current / row count
+- CIM `metadataFields` will appear when present on an import (the sample UFC 1-200-01 export has an empty list)
+

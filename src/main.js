@@ -1,7 +1,7 @@
 import './style.css';
 import { listDocs, getDoc, deleteDoc, saveDoc } from './db.js';
 import { importFile, importFromUrl } from './import.js';
-import { walkToc, renderDocumentBody, searchDocument, escapeHtml } from './render.js';
+import { walkToc, renderDocumentBody, searchDocument, escapeHtml, flattenRequirements, requirementsToCsv } from './render.js';
 import { trySyncFromApi, liveVersionUrl } from './api.js';
 
 const FIXTURE = '/fixtures/ufc-1-200-01-content.json';
@@ -15,6 +15,9 @@ let state = {
   searchHits: [],
   status: '',
   error: '',
+  readerMode: 'document', // document | table
+  tableFilter: '',
+  tableTypeFilter: 'all', // all | TEXT | HEADING | CHAPTER | notes
 };
 
 async function refreshLibrary() {
@@ -243,22 +246,24 @@ function renderReader() {
   }
   const c = doc.content.criterion;
   const sections = doc.content.sections || [];
-  const toc = walkToc(sections);
-  const body = renderDocumentBody(sections);
   const live = liveVersionUrl(c.versionId);
+  const docMeta = {
+    designation: c.designation || '',
+    title: c.title || '',
+    versionNumber: c.versionNumber || '',
+    versionId: c.versionId || '',
+    datePublished: c.datePublished || '',
+  };
+  const allRows = flattenRequirements(sections, docMeta);
+  const mode = state.readerMode || 'document';
 
-  const hitsHtml = state.searchHits.length
-    ? `<ul class="hits">${state.searchHits
-        .map(
-          (h) =>
-            `<li><a href="#sec-${escapeHtml(h.sectionId)}"><strong>${escapeHtml(h.title)}</strong></a><br/><span class="snippet">${escapeHtml(h.snippet)}</span></li>`
-        )
-        .join('')}</ul>`
-    : state._lastQuery
-      ? `<p class="muted">No hits for “${escapeHtml(state._lastQuery)}”.</p>`
-      : '';
+  const modeToggle = `
+    <div class="mode-toggle" role="tablist" aria-label="Reader mode">
+      <button type="button" class="mode-btn ${mode === 'document' ? 'active' : ''}" data-mode="document" role="tab" aria-selected="${mode === 'document'}">Document</button>
+      <button type="button" class="mode-btn ${mode === 'table' ? 'active' : ''}" data-mode="table" role="tab" aria-selected="${mode === 'table'}">Requirements table</button>
+    </div>`;
 
-  app.innerHTML = `
+  const header = `
     ${banner()}
     <header class="top reader-top">
       <button type="button" id="btn-back" class="secondary">← Library</button>
@@ -269,60 +274,214 @@ function renderReader() {
           · <code class="mono">${escapeHtml(c.versionId)}</code>
           ${c.datePublished ? ` · published ${escapeHtml(formatDate(c.datePublished))}` : ''}
         </p>
+        <dl class="doc-meta">
+          <div><dt>Status</dt><dd>${escapeHtml(c.criterionStatus || '—')}</dd></div>
+          <div><dt>Current</dt><dd>${c.isCurrent ? 'Yes' : 'No'}</dd></div>
+          <div><dt>Requirements rows</dt><dd>${allRows.length}</dd></div>
+        </dl>
       </div>
       <div class="reader-actions">
+        ${modeToggle}
         <a class="link-btn primary" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
       </div>
-    </header>
+    </header>`;
 
-    <div class="reader-layout">
-      <aside class="toc">
-        <h2>Contents</h2>
-        <nav>
-          <ul>
-            ${toc
-              .map(
-                (t) =>
-                  `<li class="d${t.depth}"><a href="#sec-${escapeHtml(t.id)}">${escapeHtml(t.title)}</a></li>`
-              )
-              .join('')}
-          </ul>
-        </nav>
-        <div class="search-box">
-          <h2>Search</h2>
-          <form id="search-form">
-            <input type="search" id="search-q" placeholder="In-document search…" />
-            <button type="submit">Search</button>
-          </form>
-          <div id="search-results">${hitsHtml}</div>
+  let mainHtml = '';
+  if (mode === 'table') {
+    const q = (state.tableFilter || '').trim().toLowerCase();
+    const typeF = state.tableTypeFilter || 'all';
+    let rows = allRows;
+    if (typeF === 'notes') {
+      rows = rows.filter((r) => r.commentary || r.explanation);
+    } else if (typeF !== 'all') {
+      rows = rows.filter((r) => r.type === typeF);
+    }
+    if (q) {
+      rows = rows.filter((r) =>
+        [r.path, r.label, r.heading, r.text, r.commentary, r.explanation, r.status]
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
+      );
+    }
+
+    const bodyRows = rows.length
+      ? rows
+          .map((r) => {
+            const text = r.text.length > 280 ? `${escapeHtml(r.text.slice(0, 280))}…` : escapeHtml(r.text);
+            const notes = [r.commentary && `<div class="note"><strong>Commentary:</strong> ${escapeHtml(r.commentary)}</div>`,
+                           r.explanation && `<div class="note"><strong>Explanation:</strong> ${escapeHtml(r.explanation)}</div>`]
+              .filter(Boolean)
+              .join('');
+            return `<tr data-sec="${escapeHtml(r.id)}">
+              <td class="path">${escapeHtml(r.path || '—')}</td>
+              <td class="label">${escapeHtml(r.label || '—')}</td>
+              <td class="heading">${escapeHtml(r.heading || '—')}</td>
+              <td class="type"><span class="pill">${escapeHtml(r.type || '—')}</span></td>
+              <td class="status">${escapeHtml(r.status || '—')}</td>
+              <td class="req">${text}${notes}${r.hasTable ? '<div class="flag">Contains table</div>' : ''}${r.hasImage ? '<div class="flag">Contains image ref</div>' : ''}</td>
+              <td class="jump"><button type="button" class="secondary" data-jump="${escapeHtml(r.id)}">View</button></td>
+            </tr>`;
+          })
+          .join('')
+      : `<tr><td colspan="7" class="empty">No rows match this filter.</td></tr>`;
+
+    mainHtml = `
+      <section class="panel table-panel">
+        <div class="table-toolbar">
+          <input type="search" id="table-filter" placeholder="Filter requirements…" value="${escapeHtml(state.tableFilter || '')}" />
+          <select id="table-type">
+            <option value="all"${typeF === 'all' ? ' selected' : ''}>All types</option>
+            <option value="TEXT"${typeF === 'TEXT' ? ' selected' : ''}>TEXT</option>
+            <option value="HEADING"${typeF === 'HEADING' ? ' selected' : ''}>HEADING</option>
+            <option value="CHAPTER"${typeF === 'CHAPTER' ? ' selected' : ''}>CHAPTER</option>
+            <option value="notes"${typeF === 'notes' ? ' selected' : ''}>Has commentary/explanation</option>
+          </select>
+          <span class="muted">${rows.length} / ${allRows.length} rows</span>
+          <button type="button" id="btn-csv" class="secondary">Export CSV</button>
         </div>
-      </aside>
-      <main class="doc-body">
-        ${body}
-      </main>
-    </div>
-    ${statusBlock()}
-  `;
+        <p class="hint">Tabular view for project review — filter, then export CSV. “View” switches to Document and jumps to that section. Document-level metadataFields are shown when present in the import (this sample has none).</p>
+        <div class="table-scroll req-table-wrap">
+          <table class="req-table">
+            <thead>
+              <tr>
+                <th>Section path</th>
+                <th>Label</th>
+                <th>Heading</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Requirement / notes</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+      </section>`;
+  } else {
+    const toc = walkToc(sections);
+    const body = renderDocumentBody(sections);
+    const hitsHtml = state.searchHits.length
+      ? `<ul class="hits">${state.searchHits
+          .map(
+            (h) =>
+              `<li><a href="#sec-${escapeHtml(h.sectionId)}"><strong>${escapeHtml(h.title)}</strong></a><br/><span class="snippet">${escapeHtml(h.snippet)}</span></li>`
+          )
+          .join('')}</ul>`
+      : state._lastQuery
+        ? `<p class="muted">No hits for “${escapeHtml(state._lastQuery)}”.</p>`
+        : '';
+
+    mainHtml = `
+      <div class="reader-layout">
+        <aside class="toc">
+          <h2>Contents</h2>
+          <nav>
+            <ul>
+              ${toc
+                .map(
+                  (t) =>
+                    `<li class="d${t.depth}"><a href="#sec-${escapeHtml(t.id)}">${escapeHtml(t.title)}</a></li>`
+                )
+                .join('')}
+            </ul>
+          </nav>
+          <div class="search-box">
+            <h2>Search</h2>
+            <form id="search-form">
+              <input type="search" id="search-q" placeholder="In-document search…" />
+              <button type="submit">Search</button>
+            </form>
+            <div id="search-results">${hitsHtml}</div>
+          </div>
+        </aside>
+        <main class="doc-body">
+          ${body}
+        </main>
+      </div>`;
+  }
+
+  app.innerHTML = `${header}${mainHtml}${statusBlock()}`;
 
   document.getElementById('btn-back')?.addEventListener('click', async () => {
     state.view = 'library';
     state.current = null;
+    state.readerMode = 'document';
     await refreshLibrary();
     renderLibrary();
   });
 
-  document.getElementById('search-form')?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const q = document.getElementById('search-q')?.value || '';
-    state._lastQuery = q;
-    state.searchHits = searchDocument(sections, q);
-    renderReader();
-    const input = document.getElementById('search-q');
-    if (input) {
-      input.value = q;
-      input.focus();
-    }
+  app.querySelectorAll('[data-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.readerMode = btn.getAttribute('data-mode');
+      renderReader();
+    });
   });
+
+  if (mode === 'table') {
+    const filterEl = document.getElementById('table-filter');
+    const typeEl = document.getElementById('table-type');
+    let timer;
+    filterEl?.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        state.tableFilter = filterEl.value;
+        renderReader();
+        const again = document.getElementById('table-filter');
+        if (again) {
+          again.focus();
+          again.setSelectionRange(again.value.length, again.value.length);
+        }
+      }, 180);
+    });
+    typeEl?.addEventListener('change', () => {
+      state.tableTypeFilter = typeEl.value;
+      renderReader();
+    });
+    document.getElementById('btn-csv')?.addEventListener('click', () => {
+      const csv = requirementsToCsv(allRows);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${(c.designation || 'ufc').replace(/\\s+/g, '-')}-requirements.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setStatus(`Exported ${allRows.length} rows to CSV`);
+      // keep table visible; flash only
+      const flash = statusBlock();
+      if (flash) {
+        /* status shown on next full render — soft update */
+      }
+    });
+    app.querySelectorAll('[data-jump]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-jump');
+        state.readerMode = 'document';
+        state._jumpTo = id;
+        renderReader();
+      });
+    });
+  } else {
+    document.getElementById('search-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const q = document.getElementById('search-q')?.value || '';
+      state._lastQuery = q;
+      state.searchHits = searchDocument(sections, q);
+      renderReader();
+      const input = document.getElementById('search-q');
+      if (input) {
+        input.value = q;
+        input.focus();
+      }
+    });
+    if (state._jumpTo) {
+      const id = state._jumpTo;
+      state._jumpTo = null;
+      requestAnimationFrame(() => {
+        document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+  }
 }
 
 async function boot() {
