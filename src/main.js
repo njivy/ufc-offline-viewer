@@ -41,7 +41,11 @@ import {
 const FIXTURE = './fixtures/ufc-1-200-01-content.json'
 const IMAGE_DEMO_PACK = './fixtures/image-demo-pack.zip'
 const app = document.querySelector('#app');
-if (location.hash === '#print-preview') document.body.classList.add('force-print');
+function applyPrintPreviewHash() {
+  document.body.classList.toggle('force-print', location.hash === '#print-preview');
+}
+applyPrintPreviewHash();
+window.addEventListener('hashchange', applyPrintPreviewHash);
 
 
 let state = {
