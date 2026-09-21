@@ -1531,3 +1531,177 @@ button.danger-quiet:hover {
   border-radius: 6px;
   transition: background 0.4s ease, outline-color 0.4s ease;
 }
+
+/* —— Screen: print-only chrome —— */
+.print-only { display: none !important; }
+
+/* —— Print: optimized field layout —— */
+@media print {
+  :root {
+    color: #000;
+    background: #fff;
+  }
+  body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  #app {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .print-only { display: block !important; }
+  .print-doc-header {
+    display: block !important;
+    margin: 0 0 1rem;
+    padding-bottom: 0.65rem;
+    border-bottom: 1.5pt solid #222;
+  }
+  .print-kicker {
+    margin: 0 0 0.25rem;
+    font-size: 9pt;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #444;
+  }
+  .print-title {
+    margin: 0 0 0.35rem;
+    font-size: 16pt;
+    line-height: 1.25;
+    color: #000;
+  }
+  .print-meta {
+    margin: 0;
+    font-size: 9.5pt;
+    color: #222;
+  }
+
+  /* Hide app chrome */
+  .banner,
+  .project-bar,
+  .workspace-bar,
+  .top,
+  .reader-top,
+  .reader-actions,
+  .live-links,
+  .mode-toggle,
+  .mode-btn,
+  .toc,
+  .notes-panel,
+  .flash,
+  .hint,
+  .lede,
+  .table-toolbar,
+  .file-btn,
+  .link-btn,
+  button,
+  .doc-meta details,
+  .meta-panel,
+  .jump,
+  .status {
+    display: none !important;
+  }
+
+  /* Reader layout: full width body */
+  .reader-layout,
+  .reader-with-notes {
+    display: block !important;
+    grid-template-columns: none !important;
+  }
+  .doc-body,
+  .doc-main,
+  main.doc-body,
+  .table-panel {
+    width: 100% !important;
+    max-width: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Typography */
+  .doc-body,
+  .doc-body * {
+    color: #000 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  .doc-body h1,
+  .doc-body h2,
+  .doc-body h3,
+  .doc-body h4,
+  .sec-heading,
+  section.sec {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .sec-heading {
+    page-break-after: avoid;
+  }
+  figure,
+  .media-image,
+  .media-table,
+  img {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    max-width: 100% !important;
+  }
+  img {
+    max-height: 8in;
+  }
+
+  /* Notes omitted from print by default */
+  .notes-panel,
+  .note-chip,
+  .note-marker,
+  .noted-mark,
+  button.note-btn,
+  .sec-note-btn {
+    display: none !important;
+  }
+
+  @page {
+    margin: 0.6in;
+  }
+}
+
+
+/* Screen preview of print layout (hash #print-preview) — for QA walks */
+body.force-print .print-only { display: block !important; }
+body.force-print .banner,
+body.force-print .project-bar,
+body.force-print .top,
+body.force-print .reader-actions,
+body.force-print .live-links,
+body.force-print .mode-toggle,
+body.force-print .toc,
+body.force-print .notes-panel,
+body.force-print .flash,
+body.force-print .hint,
+body.force-print button,
+body.force-print .link-btn,
+body.force-print .file-btn,
+body.force-print .meta-panel {
+  display: none !important;
+}
+body.force-print {
+  background: #fff;
+  color: #000;
+}
+body.force-print #app {
+  max-width: none;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+}
+body.force-print .reader-layout,
+body.force-print .reader-with-notes {
+  display: block !important;
+  grid-template-columns: none !important;
+}
+body.force-print .doc-body {
+  width: 100%;
+  border: none;
+  box-shadow: none;
+}

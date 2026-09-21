@@ -41,6 +41,8 @@ import {
 const FIXTURE = './fixtures/ufc-1-200-01-content.json'
 const IMAGE_DEMO_PACK = './fixtures/image-demo-pack.zip'
 const app = document.querySelector('#app');
+if (location.hash === '#print-preview') document.body.classList.add('force-print');
+
 
 let state = {
   view: 'library', // library | reader
@@ -552,6 +554,7 @@ function readerActionLinks(versionId) {
   return `
     <div class="live-links">
       <a class="link-btn primary" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
+      <button type="button" class="secondary" id="btn-print" title="Print this document with a clean layout">Print</button>
       <button type="button" class="secondary" id="btn-export-pack" title="Download content + figures for handoff">Export pack</button>
       <label class="file-btn secondary-file">
         Import media pack…
@@ -832,6 +835,16 @@ function renderReader() {
         ${readerActionLinks(versionId)}
       </div>
     </header>
+    <div class="print-only print-doc-header" aria-hidden="true">
+      <p class="print-kicker">UFC Offline Viewer · field printout</p>
+      <h1 class="print-title">${escapeHtml(c.designation)} — ${escapeHtml(c.title)}</h1>
+      <p class="print-meta">
+        Version ${escapeHtml(c.versionNumber || '—')}
+        · ${escapeHtml(c.versionId)}
+        ${c.datePublished ? ` · Published ${escapeHtml(formatDate(c.datePublished))}` : ''}
+        · Applicable project: <strong>${escapeHtml(state.applicableProject || '—')}</strong>
+      </p>
+    </div>
     ${metaPanel}`;
 
   let mainHtml = '';
@@ -992,7 +1005,11 @@ function renderReader() {
     state.metaDetailsOpen = e.target.open;
   });
 
-    document.getElementById('btn-export-pack')?.addEventListener('click', async () => {
+  document.getElementById('btn-print')?.addEventListener('click', () => {
+    window.print();
+  });
+
+  document.getElementById('btn-export-pack')?.addEventListener('click', async () => {
     try {
       setStatus('Building pack (JSON + media)…');
       const pack = await buildMediaPackZip(state.current, { includeMedia: true });

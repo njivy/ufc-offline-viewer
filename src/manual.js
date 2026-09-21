@@ -27,6 +27,7 @@ export function renderUserManualHtml() {
           <li><strong>Import</strong> JSON or ZIP packs to build your library.</li>
           <li><strong>Read</strong> with table of contents, search, and an optional requirements table.</li>
           <li><strong>Annotate</strong> with local commentary that stays on this device.</li>
+          <li><strong>Print</strong> — browser print with a clean field layout (hides app chrome and local notes; includes designation, version, and applicable project).</li>
           <li><strong>Open on live site</strong> when you need the current published document or formal change requests.</li>
         </ul>
       </section>
