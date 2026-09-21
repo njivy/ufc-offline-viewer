@@ -1,9 +1,15 @@
 /**
  * Offline IMAGE media: walk content tree, IndexedDB blobs, blob:/object URLs.
  * Images come from media packs / IndexedDB only — no live storage API fetch.
+ * Scoped by active workspace (keys namespaced with workspaceId).
  */
 
-import { openDb, txDone } from './db.js';
+import {
+  openDb,
+  txDone,
+  getActiveWorkspaceId,
+  mediaRecordKey,
+} from './db.js';
 import JSZip from 'jszip';
 
 export const MEDIA_STORE = 'media';
@@ -65,8 +71,8 @@ export function collectImageAssets(sections) {
   return out;
 }
 
-function mediaRecordKey(versionId, path) {
-  return `${versionId}\0${normalizeMediaPath(path)}`;
+function resolveWorkspaceId(workspaceId) {
+  return workspaceId || getActiveWorkspaceId();
 }
 
 export async function putMediaBlob(versionId, path, blob, meta = {}) {
@@ -74,8 +80,10 @@ export async function putMediaBlob(versionId, path, blob, meta = {}) {
   if (!versionId || !norm || !blob) {
     throw new Error('putMediaBlob requires versionId, path, and blob');
   }
+  const wid = resolveWorkspaceId(meta.workspaceId);
   const record = {
-    key: mediaRecordKey(versionId, norm),
+    key: mediaRecordKey(wid, versionId, norm),
+    workspaceId: wid,
     versionId,
     path: norm,
     blob,
@@ -92,13 +100,14 @@ export async function putMediaBlob(versionId, path, blob, meta = {}) {
   return record;
 }
 
-export async function getMediaRecord(versionId, path) {
+export async function getMediaRecord(versionId, path, workspaceId = null) {
   const norm = normalizeMediaPath(path);
   if (!versionId || !norm) return null;
+  const wid = resolveWorkspaceId(workspaceId);
   const db = await openDb();
   const tx = db.transaction(MEDIA_STORE, 'readonly');
   const rec = await new Promise((resolve, reject) => {
-    const req = tx.objectStore(MEDIA_STORE).get(mediaRecordKey(versionId, norm));
+    const req = tx.objectStore(MEDIA_STORE).get(mediaRecordKey(wid, versionId, norm));
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
   });
@@ -107,22 +116,23 @@ export async function getMediaRecord(versionId, path) {
   return rec;
 }
 
-export async function listMediaForVersion(versionId) {
+export async function listMediaForVersion(versionId, workspaceId = null) {
+  const wid = resolveWorkspaceId(workspaceId);
   const db = await openDb();
   const tx = db.transaction(MEDIA_STORE, 'readonly');
-  const idx = tx.objectStore(MEDIA_STORE).index('versionId');
+  const idx = tx.objectStore(MEDIA_STORE).index('workspaceId');
   const rows = await new Promise((resolve, reject) => {
-    const req = idx.getAll(versionId);
+    const req = idx.getAll(wid);
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
   });
   await txDone(tx);
   db.close();
-  return rows;
+  return rows.filter((r) => r.versionId === versionId);
 }
 
-export async function deleteMediaForVersion(versionId) {
-  const existing = await listMediaForVersion(versionId);
+export async function deleteMediaForVersion(versionId, workspaceId = null) {
+  const existing = await listMediaForVersion(versionId, workspaceId);
   if (!existing.length) return 0;
   const db = await openDb();
   const tx = db.transaction(MEDIA_STORE, 'readwrite');
@@ -140,7 +150,6 @@ export async function deleteMediaForVersion(versionId) {
 export function matchZipEntryToMediaPath(entryName, knownPaths) {
   let name = entryName.replace(/\\/g, '/').replace(/^\/+/, '');
   if (!name || name.endsWith('/')) return null;
-  // strip common roots
   const roots = ['media/', 'images/', 'files/', 'storage/'];
   let stripped = name;
   for (const r of roots) {
@@ -156,7 +165,6 @@ export function matchZipEntryToMediaPath(entryName, knownPaths) {
     if (!norm) continue;
     if (!known) return norm;
     if (known.has(norm)) return norm;
-    // suffix match: zip has foo/bar/baz.png and known has ces/.../baz.png or full path ends with
     for (const k of known) {
       if (k === norm || k.endsWith('/' + norm) || norm.endsWith('/' + k) || k.endsWith(norm)) {
         return k;
@@ -175,6 +183,7 @@ export async function importMediaFromZip(versionId, arrayBuffer, opts = {}) {
   const known = opts.knownPaths
     ? new Set([...opts.knownPaths].map(normalizeMediaPath))
     : null;
+  const wid = resolveWorkspaceId(opts.workspaceId);
   let saved = 0;
   const imported = [];
 
@@ -197,6 +206,7 @@ export async function importMediaFromZip(versionId, arrayBuffer, opts = {}) {
     await putMediaBlob(versionId, path, blob, {
       contentType: blob.type || guessMime(path),
       source: opts.sourceLabel || 'media-pack',
+      workspaceId: wid,
     });
     saved += 1;
     imported.push(path);
@@ -215,7 +225,7 @@ function guessMime(path) {
   return 'application/octet-stream';
 }
 
-/** Object URL cache keyed by versionId\0path — revoke on clear. */
+/** Object URL cache keyed by workspaceId::versionId\0path — revoke on clear. */
 const objectUrlCache = new Map();
 
 export function revokeAllObjectUrls() {
@@ -229,9 +239,11 @@ export function revokeAllObjectUrls() {
   objectUrlCache.clear();
 }
 
-export function revokeObjectUrlsForVersion(versionId) {
+export function revokeObjectUrlsForVersion(versionId, workspaceId = null) {
+  const wid = resolveWorkspaceId(workspaceId);
+  const prefix = `${wid}::${versionId}\0`;
   for (const [key, url] of [...objectUrlCache.entries()]) {
-    if (key.startsWith(versionId + '\0')) {
+    if (key.startsWith(prefix) || key.startsWith(versionId + '\0')) {
       try {
         URL.revokeObjectURL(url);
       } catch {
@@ -245,11 +257,12 @@ export function revokeObjectUrlsForVersion(versionId) {
 /**
  * Resolve blob: URL for an image path, or null if not in pack.
  */
-export async function resolveImageObjectUrl(versionId, path) {
+export async function resolveImageObjectUrl(versionId, path, workspaceId = null) {
   const norm = normalizeMediaPath(path);
-  const cacheKey = mediaRecordKey(versionId, norm);
+  const wid = resolveWorkspaceId(workspaceId);
+  const cacheKey = mediaRecordKey(wid, versionId, norm);
   if (objectUrlCache.has(cacheKey)) return objectUrlCache.get(cacheKey);
-  const rec = await getMediaRecord(versionId, norm);
+  const rec = await getMediaRecord(versionId, norm, wid);
   if (!rec?.blob) return null;
   const url = URL.createObjectURL(rec.blob);
   objectUrlCache.set(cacheKey, url);
@@ -260,8 +273,9 @@ export async function resolveImageObjectUrl(versionId, path) {
  * After document HTML is in the DOM, fill IMAGE figures from IndexedDB blobs.
  * Missing → keep placeholder with “not in pack”.
  */
-export async function hydrateDocumentImages(root, versionId) {
+export async function hydrateDocumentImages(root, versionId, workspaceId = null) {
   if (!root || !versionId) return { hydrated: 0, missing: 0 };
+  const wid = resolveWorkspaceId(workspaceId);
   const figures = root.querySelectorAll('figure.media-image[data-media-path]');
   let hydrated = 0;
   let missing = 0;
@@ -270,7 +284,7 @@ export async function hydrateDocumentImages(root, versionId) {
     const path = fig.getAttribute('data-media-path') || '';
     const alt = fig.getAttribute('data-media-alt') || 'Image';
     const caption = fig.getAttribute('data-media-caption') || '';
-    const objUrl = await resolveImageObjectUrl(versionId, path);
+    const objUrl = await resolveImageObjectUrl(versionId, path, wid);
     if (objUrl) {
       const capHtml = caption
         ? `<figcaption>${escapeFig(caption)}</figcaption>`
@@ -282,7 +296,6 @@ export async function hydrateDocumentImages(root, versionId) {
     } else {
       fig.classList.add('media-missing');
       fig.classList.remove('media-loaded');
-      // placeholder already in HTML from render; ensure message present
       if (!fig.querySelector('.media-missing-msg')) {
         const p = document.createElement('p');
         p.className = 'media-missing-msg muted';
@@ -310,6 +323,7 @@ function escapeFig(s) {
 export async function buildMediaPackZip(doc, opts = {}) {
   const versionId = doc.versionId || doc.content?.criterion?.versionId;
   const content = doc.content;
+  const wid = resolveWorkspaceId(opts.workspaceId || doc.workspaceId);
   const assets = collectImageAssets(content?.sections || []);
   const zip = new JSZip();
   const designation = (doc.designation || content?.criterion?.designation || 'ufc').replace(
@@ -333,7 +347,7 @@ export async function buildMediaPackZip(doc, opts = {}) {
   if (opts.includeMedia !== false) {
     const mediaFolder = zip.folder('media');
     for (const a of assets) {
-      const rec = await getMediaRecord(versionId, a.path);
+      const rec = await getMediaRecord(versionId, a.path, wid);
       if (rec?.blob) {
         mediaFolder.file(a.path, rec.blob);
         included += 1;
@@ -350,5 +364,92 @@ export async function buildMediaPackZip(doc, opts = {}) {
     imageTotal: assets.length,
     imageIncluded: included,
     imageMissing: missing,
+  };
+}
+
+/**
+ * Export all docs in a workspace as a multi-doc ZIP:
+ * <designation>/content.json + <designation>/media/...
+ */
+export async function buildWorkspacePackZip(docs, workspaceMeta = {}, opts = {}) {
+  const zip = new JSZip();
+  const used = new Set();
+  let docCount = 0;
+  let imageIncluded = 0;
+  let imageTotal = 0;
+
+  const manifest = {
+    format: 'ufc-offline-workspace-pack',
+    formatVersion: 1,
+    exportedAt: new Date().toISOString(),
+    workspaceId: workspaceMeta.id || null,
+    workspaceName: workspaceMeta.name || null,
+    documents: [],
+  };
+
+  for (const doc of docs || []) {
+    const versionId = doc.versionId || doc.content?.criterion?.versionId;
+    const content = doc.content;
+    if (!versionId || !content) continue;
+    let folderName = (doc.designation || content?.criterion?.designation || versionId)
+      .replace(/\s+/g, '-')
+      .replace(/[^\w.-]+/g, '_');
+    let base = folderName;
+    let n = 2;
+    while (used.has(folderName)) {
+      folderName = `${base}-${n}`;
+      n += 1;
+    }
+    used.add(folderName);
+
+    const folder = zip.folder(folderName);
+    const payload = {
+      statusCode: 200,
+      success: true,
+      message: 'ufc-offline-viewer pack',
+      data: {
+        criterion: content.criterion,
+        sections: content.sections,
+        metadataFields: content.metadataFields || [],
+      },
+    };
+    folder.file('content.json', JSON.stringify(payload, null, 2));
+
+    const assets = collectImageAssets(content.sections || []);
+    imageTotal += assets.length;
+    const mediaFolder = folder.folder('media');
+    let included = 0;
+    for (const a of assets) {
+      const rec = await getMediaRecord(versionId, a.path, doc.workspaceId);
+      if (rec?.blob) {
+        mediaFolder.file(a.path, rec.blob);
+        included += 1;
+        imageIncluded += 1;
+      }
+    }
+
+    manifest.documents.push({
+      folder: folderName,
+      versionId,
+      designation: doc.designation || null,
+      title: doc.title || null,
+      imagesIncluded: included,
+      imagesTotal: assets.length,
+    });
+    docCount += 1;
+  }
+
+  zip.file('workspace-manifest.json', JSON.stringify(manifest, null, 2));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const safeName = (workspaceMeta.name || 'workspace')
+    .replace(/\s+/g, '-')
+    .replace(/[^\w.-]+/g, '_');
+  return {
+    blob,
+    filename: `${safeName}-workspace-pack.zip`,
+    docCount,
+    imageIncluded,
+    imageTotal,
+    manifest,
   };
 }

@@ -1,17 +1,22 @@
 /** Offline-only local commentary attached to document elements (IndexedDB). Does not sync to CIM. */
 
-import { openDb, txDone } from './db.js';
+import { openDb, txDone, getActiveWorkspaceId } from './db.js';
 
 const NOTES = 'notes';
 export const NOTES_FORMAT = 'ufc-offline-notes';
 export const NOTES_FORMAT_VERSION = 1;
 
-export async function listNotesForVersion(versionId) {
+function resolveWorkspaceId(workspaceId) {
+  return workspaceId || getActiveWorkspaceId();
+}
+
+export async function listNotesForVersion(versionId, workspaceId = null) {
+  const wid = resolveWorkspaceId(workspaceId);
   const db = await openDb();
   const tx = db.transaction(NOTES, 'readonly');
-  const idx = tx.objectStore(NOTES).index('versionId');
+  const idx = tx.objectStore(NOTES).index('workspaceVersion');
   const notes = await new Promise((resolve, reject) => {
-    const req = idx.getAll(versionId);
+    const req = idx.getAll([wid, versionId]);
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
   });
@@ -20,11 +25,13 @@ export async function listNotesForVersion(versionId) {
   return notes.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
 }
 
-export async function listAllNotes() {
+export async function listAllNotes(workspaceId = null) {
+  const wid = resolveWorkspaceId(workspaceId);
   const db = await openDb();
   const tx = db.transaction(NOTES, 'readonly');
+  const idx = tx.objectStore(NOTES).index('workspaceId');
   const notes = await new Promise((resolve, reject) => {
-    const req = tx.objectStore(NOTES).getAll();
+    const req = idx.getAll(wid);
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
   });
@@ -33,8 +40,8 @@ export async function listAllNotes() {
   return notes.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
 }
 
-export async function countNotesByTarget(versionId) {
-  const notes = await listNotesForVersion(versionId);
+export async function countNotesByTarget(versionId, workspaceId = null) {
+  const notes = await listNotesForVersion(versionId, workspaceId);
   const map = Object.create(null);
   for (const n of notes) {
     const key = `${n.targetType}:${n.targetId}`;
@@ -45,8 +52,10 @@ export async function countNotesByTarget(versionId) {
 
 export async function saveNote(note) {
   const now = new Date().toISOString();
+  const wid = resolveWorkspaceId(note.workspaceId);
   const record = {
     id: note.id || crypto.randomUUID(),
+    workspaceId: wid,
     versionId: note.versionId,
     targetType: note.targetType, // 'section' | 'sentence'
     targetId: note.targetId,
@@ -76,8 +85,8 @@ export async function deleteNote(id) {
   db.close();
 }
 
-export async function deleteNotesForVersion(versionId) {
-  const existing = await listNotesForVersion(versionId);
+export async function deleteNotesForVersion(versionId, workspaceId = null) {
+  const existing = await listNotesForVersion(versionId, workspaceId);
   if (!existing.length) return 0;
   const db = await openDb();
   const tx = db.transaction(NOTES, 'readwrite');
@@ -91,7 +100,7 @@ export async function deleteNotesForVersion(versionId) {
 /**
  * Build a portable JSON document for download.
  * @param {object[]} notes
- * @param {{ scope?: string, versionId?: string }} meta
+ * @param {{ scope?: string, versionId?: string, applicableProject?: string, workspaceName?: string, workspaceId?: string }} meta
  */
 export function buildNotesExport(notes, meta = {}) {
   return {
@@ -100,9 +109,12 @@ export function buildNotesExport(notes, meta = {}) {
     exportedAt: new Date().toISOString(),
     scope: meta.scope || (meta.versionId ? 'version' : 'all'),
     versionId: meta.versionId || null,
-    applicableProject: meta.applicableProject || null,
+    applicableProject: meta.applicableProject || meta.workspaceName || null,
+    workspaceName: meta.workspaceName || meta.applicableProject || null,
+    workspaceId: meta.workspaceId || null,
     notes: (notes || []).map((n) => ({
       id: n.id,
+      workspaceId: n.workspaceId || null,
       versionId: n.versionId,
       targetType: n.targetType,
       targetId: n.targetId,
@@ -114,10 +126,14 @@ export function buildNotesExport(notes, meta = {}) {
 }
 
 export async function exportNotesJson(versionId = null, extraMeta = {}) {
-  const notes = versionId ? await listNotesForVersion(versionId) : await listAllNotes();
+  const wid = resolveWorkspaceId(extraMeta.workspaceId);
+  const notes = versionId
+    ? await listNotesForVersion(versionId, wid)
+    : await listAllNotes(wid);
   return buildNotesExport(notes, {
-    scope: versionId ? 'version' : 'all',
+    scope: versionId ? 'version' : 'workspace',
     versionId: versionId || null,
+    workspaceId: wid,
     ...extraMeta,
   });
 }
@@ -142,16 +158,13 @@ function parseNotesPayload(raw) {
 }
 
 /**
- * Import notes from a parsed JSON payload.
- * @param {object} raw
- * @param {{ mode: 'merge'|'replace', versionId?: string|null }} options
- *   - merge: upsert by note id; if incoming has no id, match versionId+targetType+targetId or create
- *   - replace: delete existing notes for the target versionId(s), then insert
+ * Import notes from a parsed JSON payload into the active (or given) workspace.
  */
 export async function importNotesPayload(raw, options = {}) {
   const mode = options.mode === 'replace' ? 'replace' : 'merge';
   const { notes: incoming } = parseNotesPayload(raw);
   const forceVersionId = options.versionId || null;
+  const wid = resolveWorkspaceId(options.workspaceId);
 
   const normalized = [];
   for (const n of incoming) {
@@ -162,6 +175,7 @@ export async function importNotesPayload(raw, options = {}) {
     if (!versionId || !targetType || !targetId || !body) continue;
     normalized.push({
       id: n.id || null,
+      workspaceId: wid,
       versionId,
       targetType,
       targetId,
@@ -181,16 +195,15 @@ export async function importNotesPayload(raw, options = {}) {
       ? [forceVersionId]
       : [...new Set(normalized.map((n) => n.versionId))];
     for (const vid of versionIds) {
-      deleted += await deleteNotesForVersion(vid);
+      deleted += await deleteNotesForVersion(vid, wid);
     }
   }
 
-  // For merge: load existing to preserve ids when matching targets without id
   const existingByVersion = new Map();
   if (mode === 'merge') {
     const vids = [...new Set(normalized.map((n) => n.versionId))];
     for (const vid of vids) {
-      existingByVersion.set(vid, await listNotesForVersion(vid));
+      existingByVersion.set(vid, await listNotesForVersion(vid, wid));
     }
   }
 
@@ -214,6 +227,7 @@ export async function importNotesPayload(raw, options = {}) {
     }
     await saveNote({
       id: id || undefined,
+      workspaceId: wid,
       versionId: n.versionId,
       targetType: n.targetType,
       targetId: n.targetId,

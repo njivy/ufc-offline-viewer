@@ -1249,6 +1249,47 @@ label.secondary-file {
   font-style: italic;
 }
 
+
+/* Workspaces (v0.9) */
+.workspace-bar .workspace-select {
+  flex: 0 1 12rem;
+  min-width: 9rem;
+  max-width: 18rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+.workspace-bar .workspace-select:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent, #2f6fed) 45%, transparent);
+  border-color: var(--accent, #2f6fed);
+}
+.workspace-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.library-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+.library-heading-row h2 {
+  margin: 0;
+}
+button.danger-quiet {
+  color: #8b2e2e;
+}
+button.danger-quiet:hover {
+  background: #fdecec;
+  border-color: #e0a0a0;
+}
+
 /* Soften leftover advanced styles if any */
 .advanced-disclosure { display: none; }
 

@@ -7,7 +7,7 @@ Static browser app for **offline reading** of Unified Facilities Criteria (UFC) 
 - **Import (primary):** `.json` or `.zip` (content + optional figures) → stored on this device → fully offline read.
 - **No live API fetch:** Content and images come only from local import / media packs / bundled samples (see Technical notes in the in-app **User manual**).
 - **Writes:** “Open on live site” only. Formal CCR stays on digital.wbdg.org — see [docs/CCR-PLAN.md](./docs/CCR-PLAN.md). Local notes never sync.
-- **Applicable project:** Project name remembered on this device; included in notes export metadata.
+- **Workspaces (v0.9):** Per-job isolation — each workspace has its own docs, notes, and media. Switcher: create / rename / switch / delete. Workspace name replaces Applicable project.
 - **v0.8:** Quieter main chrome, in-app **User manual**, and first-class local commentary UX (ownership labels, filter, jump, scroll-preserving edit).
 
 ## Quick start
@@ -50,7 +50,7 @@ See [IMPORT.md](./IMPORT.md) for export sources and zip notes.
 
 1. `npm run dev` (or open a built deploy).
 2. Import the fixture (or any content JSON).
-3. Open DevTools → Application → IndexedDB → `ufc-offline` → `docs` (keyed by `versionId`).
+3. Open DevTools → Application → IndexedDB → `ufc-offline` → `docs` (keyed by `workspaceId::versionId`) and `workspaces`.
 4. Open the document → TOC, body text, tables, in-document search.
 5. Turn off network (DevTools Offline) → **document data** is already in IndexedDB. Re-open the library after load and open the doc again while offline.
 6. “Open on live site” should point at `https://digital.wbdg.org/versions/…` for the sample (href only — no API).
@@ -60,16 +60,23 @@ See [IMPORT.md](./IMPORT.md) for export sources and zip notes.
 
 - Vite + vanilla JS
 - JSZip (zip imports)
-- IndexedDB database `ufc-offline` (v3): store `docs` (key `versionId`) + `notes` (local commentary) + `media` (IMAGE blobs keyed by versionId + path)
-- `localStorage` key `ufc-offline-applicable-project` for Applicable project
+- IndexedDB database `ufc-offline` (v4): `workspaces` + `docs` (key `workspaceId::versionId`) + `notes` (with `workspaceId`) + `media` (keys namespaced `workspaceId::versionId\0path`)
+- `localStorage` key `ufc-offline-active-workspace` for the active workspace id
 
 ## Repo
 
 https://github.com/njivy/ufc-offline-viewer
 
-## Applicable project (v0.7+)
+## Workspaces (v0.9)
 
-Set a project name anytime in the **Applicable project** field (library home and reader). It persists in this browser and appears in notes export metadata as `applicableProject`.
+Each **workspace** isolates one job/project: its own UFC library, notes, and figures.
+
+- **Workspace / project** bar (library + reader): select, rename (name = project title), New, Delete.
+- Imports and notes apply to the **active** workspace only.
+- **Export workspace pack** on the library downloads a ZIP of all docs in that workspace (`<designation>/content.json` + `media/`, plus `workspace-manifest.json`).
+- **Migration from v0.8:** on first open, existing docs/notes/media are tagged into workspace `default`, named from the old Applicable project string (or “Default”). Clearing that legacy `localStorage` key is automatic after migrate.
+
+Notes export metadata includes `workspaceName` / `applicableProject` (same value) and `workspaceId`.
 
 ## Local commentary (v0.3+, UX pass in v0.8)
 

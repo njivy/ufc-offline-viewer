@@ -11,7 +11,7 @@ export function renderUserManualHtml() {
       <nav class="manual-toc" aria-label="Manual sections">
         <a href="#man-purpose">Purpose</a>
         <a href="#man-import">Import packs</a>
-        <a href="#man-project">Applicable project</a>
+        <a href="#man-workspaces">Workspaces</a>
         <a href="#man-reading">Reading</a>
         <a href="#man-notes">Local commentary</a>
         <a href="#man-export">Export</a>
@@ -43,9 +43,17 @@ export function renderUserManualHtml() {
         <p><strong>Samples</strong> (collapsed under Import) includes a small UFC fixture and an image demo pack for trying the app without your own export.</p>
       </section>
 
-      <section id="man-project" class="manual-section">
-        <h3>Applicable project</h3>
-        <p>Set a project name (for example, a facility or job) on the library or reader screen. It is remembered in this browser only and can be included when you export notes, so handoffs stay labeled for the right job.</p>
+      <section id="man-workspaces" class="manual-section">
+        <h3>Workspaces</h3>
+        <p>Each <strong>workspace</strong> is an isolated job or project: its own library of UFC documents, local notes, and figures. Use the <strong>Workspace / project</strong> bar on the library and reader screens to:</p>
+        <ul>
+          <li><strong>Switch</strong> among workspaces (library reloads; the reader closes if the open doc is not in the new workspace).</li>
+          <li><strong>Rename</strong> the active workspace — the name <em>is</em> your applicable project title.</li>
+          <li><strong>New</strong> — create an empty workspace for another job.</li>
+          <li><strong>Delete</strong> — remove a workspace and all of its docs, notes, and media (you cannot delete the last remaining workspace).</li>
+        </ul>
+        <p>Imports land in the active workspace. <strong>Export workspace pack</strong> downloads a ZIP of every document in the workspace (each folder has <code>content.json</code> plus <code>media/</code> when figures are stored), plus a <code>workspace-manifest.json</code>.</p>
+        <p>Upgrading from v0.8: existing data moves into a workspace named from your previous Applicable project (or <em>Default</em>). The active workspace id is stored in <code>localStorage</code>.</p>
       </section>
 
       <section id="man-reading" class="manual-section">
@@ -73,7 +81,8 @@ export function renderUserManualHtml() {
         <h3>Export notes and packs</h3>
         <ul>
           <li><strong>Export pack</strong> (reader) — download JSON plus any stored figures for air-gap handoff.</li>
-          <li><strong>Export notes JSON</strong> — download local commentary for this version (includes applicable project when set).</li>
+          <li><strong>Export notes JSON</strong> — download local commentary for this version (includes workspace / project name in metadata).</li>
+          <li><strong>Export workspace pack</strong> (library) — ZIP of all docs in the active workspace for air-gap handoff.</li>
           <li><strong>Export CSV</strong> — from Requirements table mode, for spreadsheet review.</li>
         </ul>
       </section>
@@ -99,7 +108,7 @@ export function renderUserManualHtml() {
         <div class="manual-tech-body">
           <p>These details are optional. Day-to-day use does not require them.</p>
           <ul>
-            <li><strong>Storage:</strong> Documents, figures, and notes are kept in this browser’s IndexedDB database <code>ufc-offline</code>. Applicable project uses <code>localStorage</code>.</li>
+            <li><strong>Storage:</strong> IndexedDB database <code>ufc-offline</code> (v4): stores <code>workspaces</code>, <code>docs</code> (composite id <code>workspaceId::versionId</code>), <code>notes</code>, and <code>media</code> (keys namespaced by workspace). Active workspace id: <code>localStorage</code> key <code>ufc-offline-active-workspace</code>. Migration from v3 tags prior data into workspace <code>default</code>.</li>
             <li><strong>No live API:</strong> The app does not call <code>api.digital.wbdg.org</code> (CORS is not available for this origin). Content arrives only via import / packs / bundled static assets.</li>
             <li><strong>Images:</strong> Figures hydrate as local <code>blob:</code> URLs from imported media — never hot-linked from the API.</li>
             <li><strong>Cached catalog:</strong> Under Samples, an optional bundled directory JSON may be shown for discovery; it can be stale and does not download content.</li>

@@ -25,35 +25,22 @@ import {
   collectImageAssets,
   hydrateDocumentImages,
   buildMediaPackZip,
+  buildWorkspacePackZip,
   deleteMediaForVersion,
   listMediaForVersion,
   revokeAllObjectUrls,
   revokeObjectUrlsForVersion,
 } from './media.js';
+import {
+  renderWorkspaceBar,
+  bindWorkspaceBar,
+  loadWorkspaceState,
+  getActiveWorkspaceId,
+} from './workspaces.js';
 
 const FIXTURE = './fixtures/ufc-1-200-01-content.json'
 const IMAGE_DEMO_PACK = './fixtures/image-demo-pack.zip'
 const app = document.querySelector('#app');
-const PROJECT_KEY = 'ufc-offline-applicable-project';
-
-function loadApplicableProject() {
-  try {
-    return localStorage.getItem(PROJECT_KEY) || '';
-  } catch {
-    return '';
-  }
-}
-
-function saveApplicableProject(value) {
-  const v = String(value || '').trim();
-  try {
-    if (v) localStorage.setItem(PROJECT_KEY, v);
-    else localStorage.removeItem(PROJECT_KEY);
-  } catch {
-    /* ignore quota / private mode */
-  }
-  return v;
-}
 
 let state = {
   view: 'library', // library | reader
@@ -75,7 +62,9 @@ let state = {
   samplesOpen: false,
   catalogOpen: false, // Samples → show cached catalog
   metaDetailsOpen: false, // reader Details disclosure
-  applicableProject: loadApplicableProject(),
+  applicableProject: '', // mirrors active workspace name
+  workspaces: [],
+  activeWorkspaceId: getActiveWorkspaceId(),
   manualOpen: false,
   notesFilter: '',
   notesFilterType: 'all', // all | section | sentence
@@ -123,47 +112,43 @@ function banner() {
 }
 
 function projectBar(opts = {}) {
-  const compact = !!opts.compact;
-  const project = state.applicableProject || '';
-  const display = project
-    ? `<strong class="project-name">${escapeHtml(project)}</strong>`
-    : `<span class="project-unset muted">Not set</span>`;
-  return `
-    <section class="project-bar ${compact ? 'project-bar-compact' : ''}" aria-label="Applicable project">
-      <label class="project-label" for="applicable-project">Applicable project</label>
-      <div class="project-row">
-        <input
-          type="text"
-          id="applicable-project"
-          class="project-input"
-          placeholder="e.g. Hangar renovation — Base X"
-          value="${escapeHtml(project)}"
-          autocomplete="off"
-          spellcheck="true"
-        />
-        <button type="button" class="secondary" id="btn-save-project">Save</button>
-      </div>
-      <p class="project-current hint">Current: ${display} · remembered on this device</p>
-    </section>`;
+  return renderWorkspaceBar({
+    workspaces: state.workspaces || [],
+    activeWorkspaceId: state.activeWorkspaceId || getActiveWorkspaceId(),
+    compact: !!opts.compact,
+  });
 }
 
-function bindProjectBar(rerender) {
-  const input = document.getElementById('applicable-project');
-  const save = () => {
-    state.applicableProject = saveApplicableProject(input?.value || '');
-    setStatus(
-      state.applicableProject
-        ? `Applicable project set to “${state.applicableProject}”`
-        : 'Applicable project cleared'
-    );
-    rerender();
-  };
-  document.getElementById('btn-save-project')?.addEventListener('click', save);
-  input?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      save();
-    }
+async function handleWorkspaceChanged(flags = {}) {
+  await loadWorkspaceState(state);
+  if (flags.switched || flags.deleted || flags.created) {
+    revokeAllObjectUrls();
+    state.current = null;
+    state.view = 'library';
+    state.notes = [];
+    state.noteCounts = {};
+    state.noteDraft = null;
+    state.mediaStats = null;
+    state.searchHits = [];
+    state.activeNoteId = null;
+    state.targetIndex = {};
+    await refreshLibrary();
+    renderLibrary();
+    return;
+  }
+  if (state.view === 'reader' && state.current) {
+    renderWithScrollPreserve(() => renderReader());
+  } else {
+    await refreshLibrary();
+    renderLibrary();
+  }
+}
+
+function bindProjectBar(_rerender) {
+  bindWorkspaceBar({
+    getState: () => state,
+    setStatus,
+    onChanged: handleWorkspaceChanged,
   });
 }
 
@@ -270,7 +255,10 @@ function renderLibrary() {
     ${statusBlock()}
 
     <section class="panel library-panel" id="library-panel">
-      <h2>Library</h2>
+      <div class="library-heading-row">
+        <h2>Library</h2>
+        <button type="button" class="secondary" id="btn-export-workspace" title="Download all docs + media in this workspace">Export workspace pack</button>
+      </div>
       <div class="table-scroll">
         <table class="lib">
           <thead>
@@ -343,6 +331,36 @@ function formatDate(iso) {
 
 function bindLibrary() {
   bindProjectBar(() => renderLibrary());
+
+  document.getElementById('btn-export-workspace')?.addEventListener('click', async () => {
+    try {
+      if (!state.docs.length) {
+        setStatus('Library is empty — nothing to export', true);
+        renderLibrary();
+        return;
+      }
+      setStatus('Building workspace pack…');
+      renderLibrary();
+      const ws =
+        (state.workspaces || []).find((w) => w.id === state.activeWorkspaceId) || {
+          id: state.activeWorkspaceId,
+          name: state.applicableProject || 'workspace',
+        };
+      const pack = await buildWorkspacePackZip(state.docs, ws);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(pack.blob);
+      a.download = pack.filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setStatus(
+        `Exported ${pack.filename}: ${pack.docCount} doc(s), ${pack.imageIncluded}/${pack.imageTotal} figure(s)`
+      );
+      renderLibrary();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+      renderLibrary();
+    }
+  });
 
   document.getElementById('file-input')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
@@ -1123,7 +1141,11 @@ function bindNotesUi() {
   document.getElementById('btn-notes-export')?.addEventListener('click', async () => {
     try {
       const versionId = state.current?.versionId || state.current?.content?.criterion?.versionId;
-      const payload = await exportNotesJson(versionId, { applicableProject: state.applicableProject || null });
+      const payload = await exportNotesJson(versionId, {
+        applicableProject: state.applicableProject || null,
+        workspaceName: state.applicableProject || null,
+        workspaceId: state.activeWorkspaceId || getActiveWorkspaceId(),
+      });
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -1349,6 +1371,7 @@ async function boot() {
     state.syncAsOf = d.toISOString().slice(0, 10);
   }
   try {
+    await loadWorkspaceState(state);
     await refreshLibrary();
   } catch (err) {
     setStatus('Could not open local library: ' + (err.message || err), true);
