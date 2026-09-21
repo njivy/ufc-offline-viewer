@@ -2,12 +2,13 @@
 
 Static browser app for **offline reading** of Unified Facilities Criteria (UFC) content exported from [digital.wbdg.org](https://digital.wbdg.org).
 
-**Offline snapshot · import / packs only · not live CIM**
+**Offline snapshot · import packs to read · not a live Criteria connection**
 
-- **Import (primary):** `.json` or `.zip` (content + optional `media/`) → IndexedDB → fully offline read.
-- **No live API fetch:** This app does **not** call `api.digital.wbdg.org` (WBDG will not relax CORS). Content and images come only from local import / media packs / bundled static assets.
-- **Writes:** “Open on live site” only (href navigation). Formal CCR stays on digital.wbdg.org — see [docs/CCR-PLAN.md](./docs/CCR-PLAN.md). Local notes stay in IndexedDB and never sync.
-- **Applicable project:** User-editable project name, persisted in `localStorage`, shown on library and reader; included in notes export metadata.
+- **Import (primary):** `.json` or `.zip` (content + optional figures) → stored on this device → fully offline read.
+- **No live API fetch:** Content and images come only from local import / media packs / bundled samples (see Technical notes in the in-app **User manual**).
+- **Writes:** “Open on live site” only. Formal CCR stays on digital.wbdg.org — see [docs/CCR-PLAN.md](./docs/CCR-PLAN.md). Local notes never sync.
+- **Applicable project:** Project name remembered on this device; included in notes export metadata.
+- **v0.8:** Quieter main chrome, in-app **User manual**, and first-class local commentary UX (ownership labels, filter, jump, scroll-preserving edit).
 
 ## Quick start
 
@@ -70,15 +71,15 @@ https://github.com/njivy/ufc-offline-viewer
 
 Set a project name anytime in the **Applicable project** field (library home and reader). It persists in this browser and appears in notes export metadata as `applicableProject`.
 
-## Local commentary (v0.3+)
+## Local commentary (v0.3+, UX pass in v0.8)
 
-Offline-only notes tagged to sections or sentences. They live in IndexedDB and **do not sync** to CIM.
+Offline-only notes tagged to sections or paragraphs. They stay on this device and **do not sync** to the live Criteria site.
 
-1. Import the sample fixture (or any content JSON) and open the document.
-2. On a section heading, click **Note** (or the subtle ✉ control on a sentence).
-3. Enter text → **Save**. The notes panel lists all notes for this version.
-4. **Export notes JSON** / **Import notes…** in the notes panel — versioned format `ufc-offline-notes` v1; choose **merge** or **replace**.
-5. Reload the page, re-open the document — notes persist locally.
+1. Import a pack and open the document.
+2. On a section heading, click **Note** (or the marker on a sentence). Annotated passages show inline indicators.
+3. Enter text → **Save note** (Esc cancels; scroll position is preserved).
+4. The **Local notes** panel lists ownership (section path / paragraph snippet), supports filter, jump, edit, delete, and import/export.
+5. In-app **User manual** (library and reader) covers reading, notes, packs, and air-gap tips; Technical notes are in a collapsible appendix there.
 
 Formal CCR / writes: **Open on live site** only. Plan: [docs/CCR-PLAN.md](./docs/CCR-PLAN.md) (approved: link-out only; no in-app CCR).
 

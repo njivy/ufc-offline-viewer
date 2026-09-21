@@ -9,7 +9,9 @@ import {
   flattenRequirements,
   requirementsToCsv,
   renderDocMetaPanel,
+  buildNoteTargetIndex,
 } from './render.js';
+import { renderUserManualHtml } from './manual.js';
 import { liveVersionUrl, loadCachedDirectory } from './api.js';
 import {
   listNotesForVersion,
@@ -74,6 +76,11 @@ let state = {
   catalogOpen: false, // Samples → show cached catalog
   metaDetailsOpen: false, // reader Details disclosure
   applicableProject: loadApplicableProject(),
+  manualOpen: false,
+  notesFilter: '',
+  notesFilterType: 'all', // all | section | sentence
+  activeNoteId: null,
+  targetIndex: {},
 };
 
 let tocObserver = null;
@@ -112,7 +119,7 @@ function setStatus(msg, isError = false) {
 }
 
 function banner() {
-  return `<div class="banner" role="status">Offline snapshot · import / packs only · not live CIM</div>`;
+  return `<div class="banner" role="status">Offline snapshot · import a pack to read</div>`;
 }
 
 function projectBar(opts = {}) {
@@ -136,7 +143,7 @@ function projectBar(opts = {}) {
         />
         <button type="button" class="secondary" id="btn-save-project">Save</button>
       </div>
-      <p class="project-current hint">Current: ${display} · stored in this browser only</p>
+      <p class="project-current hint">Current: ${display} · remembered on this device</p>
     </section>`;
 }
 
@@ -163,12 +170,12 @@ function bindProjectBar(rerender) {
 function renderDirectoryBlock() {
   const dir = state.directory;
   if (!dir) {
-    return `<p class="hint dir-empty">No cached catalog loaded. Click <strong>Show cached catalog</strong> under Samples (local static asset only — not a live API).</p>`;
+    return `<p class="hint dir-empty">No catalog loaded yet. Use <strong>Show cached catalog</strong> under Samples, or import a pack to read offline.</p>`;
   }
   if (!dir.ok) {
     return `<div class="dir-banner error">
-      <p><strong>Could not load cached catalog.</strong> ${escapeHtml(dir.message || 'Unknown error')}</p>
-      <p class="hint">Import a JSON/ZIP pack above to add documents to your library.</p>
+      <p><strong>Could not load catalog.</strong> ${escapeHtml(dir.message || 'Unknown error')}</p>
+      <p class="hint">Import a pack above to add documents to your library.</p>
     </div>`;
   }
   const q = (state.directoryFilter || '').trim().toLowerCase();
@@ -202,7 +209,7 @@ function renderDirectoryBlock() {
     <div class="dir-banner">
       <div class="dir-banner-head">
         <strong>${escapeHtml(dir.label || 'Cached catalog')}</strong>
-        <span class="pill warn">local asset — may be stale</span>
+        <span class="pill warn">may be outdated</span>
         <span class="muted">${items.length} / ${(dir.items || []).length} shown</span>
       </div>
       <div class="sync-row" style="margin-top:0.5rem">
@@ -249,9 +256,14 @@ function renderLibrary() {
 
   app.innerHTML = `
     ${banner()}
-    <header class="top">
-      <h1>UFC Offline Viewer</h1>
-      <p class="lede">Import JSON or media packs to read offline. This app does not fetch live CIM content — use <strong>Open on live site</strong> when you need the current published version.</p>
+    <header class="top library-top">
+      <div class="meta">
+        <h1>UFC Offline Viewer</h1>
+        <p class="lede">Import a UFC pack to read offline, take local notes, and open the live site when you need the current published version.</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="secondary quiet-help" id="btn-manual">User manual</button>
+      </div>
     </header>
 
     ${projectBar()}
@@ -285,31 +297,33 @@ function renderLibrary() {
         </label>
       </div>
       <div id="drop-zone" class="drop-zone" tabindex="0">
-        Or drag &amp; drop a <code>.json</code> / <code>.zip</code> here
-        <span class="hint">Air-gap pack: <code>content.json</code> + <code>media/…</code></span>
+        Or drag &amp; drop a pack here
+        <span class="hint">JSON content, or ZIP with figures included</span>
       </div>
       <details class="disclosure samples-disclosure" id="samples-details"${samplesOpen}>
         <summary>Samples</summary>
         <div class="disclosure-body">
           <div class="import-row">
-            <button type="button" id="btn-fixture">Import sample fixture (UFC 1-200-01)</button>
+            <button type="button" id="btn-fixture">Import sample (UFC 1-200-01)</button>
             <button type="button" class="secondary" id="btn-image-demo">Import image demo pack</button>
-            <a class="link-btn" href="${FIXTURE}" download="ufc-1-200-01-content.json">Download fixture</a>
-            <a class="link-btn" href="${IMAGE_DEMO_PACK}" download="image-demo-pack.zip">Download image demo pack</a>
+            <a class="link-btn" href="${FIXTURE}" download="ufc-1-200-01-content.json">Download sample</a>
+            <a class="link-btn" href="${IMAGE_DEMO_PACK}" download="image-demo-pack.zip">Download image demo</a>
           </div>
-          <p class="hint">UFC 1-200-01 sample has 0 IMAGES — use the image demo pack to try blob URLs + “not in pack”.</p>
+          <p class="hint">The UFC sample has no figures — use the image demo to try rendering and “not in pack”.</p>
           <div class="import-row" style="margin-top:0.75rem">
-            <button type="button" class="secondary" id="btn-load-cached">${state.catalogOpen ? 'Refresh cached catalog' : 'Show cached catalog'}</button>
+            <button type="button" class="secondary" id="btn-load-cached">${state.catalogOpen ? 'Refresh catalog' : 'Show cached catalog'}</button>
             ${state.catalogOpen ? '<button type="button" class="secondary" id="btn-hide-cached">Hide catalog</button>' : ''}
           </div>
-          <p class="hint">Cached catalog is a bundled static JSON asset (may be stale). It does not call the live API — import a pack to read offline.</p>
+          <p class="hint">Optional title list for discovery — import a pack to read offline.</p>
           ${catalogBlock}
         </div>
       </details>
     </section>
+    ${renderManualModal()}
   `;
 
   bindLibrary();
+  bindManualUi(() => renderLibrary());
 }
 
 function statusBlock() {
@@ -382,7 +396,7 @@ function bindLibrary() {
   });
 
   document.getElementById('btn-load-cached')?.addEventListener('click', async () => {
-    setStatus('Loading cached public catalog…');
+    setStatus('Loading catalog…');
     state.catalogOpen = true;
     state.samplesOpen = true;
     renderLibrary();
@@ -390,7 +404,7 @@ function bindLibrary() {
     state.directory = result;
     state.directoryFilter = '';
     if (result.ok) {
-      setStatus(`Cached catalog: ${result.items.length} documents (local asset only)`);
+      setStatus(`Catalog: ${result.items.length} documents`);
     } else {
       setStatus(result.message || 'Cached catalog missing', true);
     }
@@ -460,7 +474,7 @@ function bindLibrary() {
   app.querySelectorAll('[data-delete]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.getAttribute('data-delete');
-      if (!confirm('Remove this document (and its stored images) from IndexedDB?')) return;
+      if (!confirm('Remove this document and its stored images from your library?')) return;
       revokeObjectUrlsForVersion(id);
       await deleteDoc(id);
       try {
@@ -515,57 +529,108 @@ function readerActionLinks(versionId) {
   const live = liveVersionUrl(versionId);
   const ms = state.mediaStats;
   const mediaHint = ms
-    ? `<p class="hint media-stat-hint">Images in IndexedDB: <strong>${ms.local}</strong> / ${ms.total} referenced</p>`
+    ? `<p class="hint media-stat-hint">Figures available: <strong>${ms.local}</strong> of ${ms.total}</p>`
     : '';
   return `
     <div class="live-links">
       <a class="link-btn primary" href="${escapeHtml(live)}" target="_blank" rel="noopener noreferrer">Open on live site</a>
-      <button type="button" class="secondary" id="btn-export-pack" title="JSON + media/ for air-gap">Export pack</button>
+      <button type="button" class="secondary" id="btn-export-pack" title="Download content + figures for handoff">Export pack</button>
       <label class="file-btn secondary-file">
         Import media pack…
         <input type="file" id="media-pack-input" accept=".zip,application/zip" hidden />
       </label>
+      <button type="button" class="secondary quiet-help" id="btn-manual">User manual</button>
     </div>
-    ${mediaHint}
-    <p class="write-hint">Writes (CCR) stay on the live CIM site — use Open on live site. Local notes never sync. Offline images come from imported media packs (IndexedDB blob URLs).</p>`;
+    ${mediaHint}`;
+}
+
+function noteOwnershipLabel(n) {
+  const idx = state.targetIndex || {};
+  const meta = idx[`${n.targetType}:${n.targetId}`];
+  if (!meta) {
+    return {
+      kindLabel: n.targetType === 'sentence' ? 'Paragraph' : 'Section',
+      path: n.targetId.slice(0, 10) + '…',
+      snippet: '',
+    };
+  }
+  return {
+    kindLabel: meta.kind === 'sentence' ? 'Paragraph' : 'Section',
+    path: meta.path || meta.title,
+    snippet: meta.preview || '',
+  };
 }
 
 function renderNotesPanel() {
-  const notes = state.notes || [];
+  const allNotes = state.notes || [];
   const open = state.notesPanelOpen !== false;
+  const q = (state.notesFilter || '').trim().toLowerCase();
+  const typeF = state.notesFilterType || 'all';
+  let notes = allNotes;
+  if (typeF === 'section' || typeF === 'sentence') {
+    notes = notes.filter((n) => n.targetType === typeF);
+  }
+  if (q) {
+    notes = notes.filter((n) => {
+      const own = noteOwnershipLabel(n);
+      return [n.body, own.path, own.snippet, own.kindLabel, n.targetType]
+        .join(' ')
+        .toLowerCase()
+        .includes(q);
+    });
+  }
+
   const list = notes.length
     ? notes
         .map((n) => {
-          const preview = n.body.length > 120 ? `${escapeHtml(n.body.slice(0, 120))}…` : escapeHtml(n.body);
-          return `<li class="note-item" data-jump-note="${escapeHtml(n.targetType)}" data-jump-id="${escapeHtml(n.targetId)}">
-            <button type="button" class="note-jump" data-jump-note="${escapeHtml(n.targetType)}" data-jump-id="${escapeHtml(n.targetId)}">
-              <span class="note-target-label">${escapeHtml(n.targetType)} · ${escapeHtml(n.targetId.slice(0, 8))}…</span>
+          const own = noteOwnershipLabel(n);
+          const preview = n.body.length > 160 ? `${escapeHtml(n.body.slice(0, 160))}…` : escapeHtml(n.body);
+          const active = state.activeNoteId === n.id ? ' active' : '';
+          const snippet = own.snippet
+            ? `<span class="note-src-snippet muted">${escapeHtml(own.snippet)}</span>`
+            : '';
+          return `<li class="note-item${active}" data-note-row="${escapeHtml(n.id)}">
+            <button type="button" class="note-jump" data-jump-note="${escapeHtml(n.targetType)}" data-jump-id="${escapeHtml(n.targetId)}" data-activate-note="${escapeHtml(n.id)}">
+              <span class="note-target-label"><span class="note-kind">${escapeHtml(own.kindLabel)}</span> · ${escapeHtml(own.path)}</span>
+              ${snippet}
               <span class="note-preview">${preview}</span>
               <span class="note-when muted">${escapeHtml(formatDate(n.updatedAt))}</span>
             </button>
             <div class="note-item-actions">
+              <button type="button" class="secondary" data-jump-note="${escapeHtml(n.targetType)}" data-jump-id="${escapeHtml(n.targetId)}" data-activate-note="${escapeHtml(n.id)}">Jump</button>
               <button type="button" class="secondary" data-edit-note="${escapeHtml(n.id)}">Edit</button>
-              <button type="button" class="secondary" data-del-note="${escapeHtml(n.id)}">Delete</button>
+              <button type="button" class="secondary danger-quiet" data-del-note="${escapeHtml(n.id)}">Delete</button>
             </div>
           </li>`;
         })
         .join('')
-    : `<li class="empty muted">No local notes for this version yet. Use <strong>Note</strong> on a section or the ✉ control on a sentence.</li>`;
+    : allNotes.length
+      ? `<li class="empty muted">No notes match this filter.</li>`
+      : `<li class="empty muted">No local notes yet. Use <strong>Note</strong> on a section heading, or the marker on a sentence.</li>`;
 
   return `
     <aside class="notes-panel ${open ? 'open' : 'collapsed'}" aria-label="Local commentary">
       <div class="notes-panel-head">
-        <h2>Local notes <span class="note-count-pill">${notes.length}</span></h2>
+        <h2>Local notes <span class="note-count-pill">${allNotes.length}</span></h2>
         <button type="button" class="secondary" id="btn-toggle-notes" aria-expanded="${open}">${open ? 'Hide' : 'Show'}</button>
       </div>
-      <p class="hint notes-offline-hint">Offline-only · stored in IndexedDB · never syncs to CIM</p>
+      <p class="hint notes-offline-hint">Stays on this device · never syncs to the live site</p>
+      <div class="notes-toolbar" ${open ? '' : 'hidden'}>
+        <input type="search" id="notes-filter" placeholder="Filter notes…" value="${escapeHtml(state.notesFilter || '')}" />
+        <select id="notes-type-filter" aria-label="Filter by target">
+          <option value="all"${typeF === 'all' ? ' selected' : ''}>All</option>
+          <option value="section"${typeF === 'section' ? ' selected' : ''}>Sections</option>
+          <option value="sentence"${typeF === 'sentence' ? ' selected' : ''}>Paragraphs</option>
+        </select>
+      </div>
       <div class="notes-io" ${open ? '' : 'hidden'}>
-        <button type="button" class="secondary" id="btn-notes-export">Export notes JSON</button>
+        <button type="button" class="secondary" id="btn-notes-export">Export notes</button>
         <label class="file-btn secondary-file">
           Import notes…
           <input type="file" id="notes-import-input" accept=".json,application/json" hidden />
         </label>
       </div>
+      <p class="hint notes-filter-meta" ${open ? '' : 'hidden'}>${notes.length} shown${q || typeF !== 'all' ? ` · ${allNotes.length} total` : ''}</p>
       <ul class="notes-list" ${open ? '' : 'hidden'}>${list}</ul>
     </aside>`;
 }
@@ -574,19 +639,91 @@ function renderNoteModal() {
   const d = state.noteDraft;
   if (!d) return '';
   const editing = !!d.noteId;
+  const meta = (state.targetIndex || {})[`${d.targetType}:${d.targetId}`];
+  const kindLabel = d.targetType === 'sentence' ? 'Paragraph' : 'Section';
+  const path = meta?.path || meta?.title || d.targetId;
+  const snippet = meta?.preview
+    ? `<blockquote class="note-target-quote">${escapeHtml(meta.preview)}</blockquote>`
+    : '';
   return `
     <div class="modal-backdrop" id="note-modal" role="dialog" aria-modal="true" aria-labelledby="note-modal-title">
-      <div class="modal">
+      <div class="modal note-edit-modal">
         <h2 id="note-modal-title">${editing ? 'Edit' : 'Add'} local note</h2>
-        <p class="muted">Target: <strong>${escapeHtml(d.targetType)}</strong> <code class="mono">${escapeHtml(d.targetId)}</code></p>
+        <p class="note-target-meta"><span class="note-kind">${escapeHtml(kindLabel)}</span> · ${escapeHtml(path)}</p>
+        ${snippet}
         <label class="sr-only" for="note-body">Note text</label>
-        <textarea id="note-body" rows="6" placeholder="Your offline commentary…">${escapeHtml(d.body || '')}</textarea>
+        <textarea id="note-body" rows="7" placeholder="Your commentary for this passage…">${escapeHtml(d.body || '')}</textarea>
         <div class="modal-actions">
-          <button type="button" id="note-save">Save</button>
           <button type="button" class="secondary" id="note-cancel">Cancel</button>
+          <button type="button" id="note-save">Save note</button>
         </div>
+        <p class="hint modal-hint">Esc cancels · stays on this device only</p>
       </div>
     </div>`;
+}
+
+function renderManualModal() {
+  if (!state.manualOpen) return '';
+  return `
+    <div class="modal-backdrop manual-backdrop" id="manual-modal" role="dialog" aria-modal="true" aria-labelledby="manual-title">
+      <div class="modal manual-modal">
+        <div class="manual-modal-chrome">
+          <button type="button" class="secondary" id="manual-close">Close</button>
+        </div>
+        ${renderUserManualHtml()}
+      </div>
+    </div>`;
+}
+
+function captureScroll() {
+  return {
+    y: window.scrollY,
+    body: app.querySelector('.doc-body')?.scrollTop ?? null,
+    notes: app.querySelector('.notes-panel')?.scrollTop ?? null,
+  };
+}
+
+function restoreScroll(saved) {
+  if (!saved) return;
+  requestAnimationFrame(() => {
+    window.scrollTo(0, saved.y || 0);
+    const body = app.querySelector('.doc-body');
+    if (body && saved.body != null) body.scrollTop = saved.body;
+    const notes = app.querySelector('.notes-panel');
+    if (notes && saved.notes != null) notes.scrollTop = saved.notes;
+  });
+}
+
+function renderWithScrollPreserve(fn) {
+  const saved = captureScroll();
+  fn();
+  restoreScroll(saved);
+}
+
+function bindManualUi(rerender) {
+  document.getElementById('btn-manual')?.addEventListener('click', () => {
+    state.manualOpen = true;
+    rerender();
+  });
+  const close = () => {
+    if (!state.manualOpen) return;
+    state.manualOpen = false;
+    rerender();
+  };
+  document.getElementById('manual-close')?.addEventListener('click', close);
+  document.getElementById('manual-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'manual-modal') close();
+  });
+  if (state.manualOpen) {
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        document.removeEventListener('keydown', onKey);
+        close();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+  }
 }
 
 function disconnectTocSpy() {
@@ -635,6 +772,7 @@ function renderReader() {
   }
   const c = doc.content.criterion;
   const sections = doc.content.sections || [];
+  state.targetIndex = buildNoteTargetIndex(sections);
   const versionId = c.versionId;
   const docMeta = {
     designation: c.designation || '',
@@ -735,7 +873,7 @@ function renderReader() {
             <span class="muted">${rows.length} / ${allRows.length} rows</span>
             <button type="button" id="btn-csv" class="secondary">Export CSV</button>
           </div>
-          <p class="hint">Tabular view for project review — filter, then export CSV. “View” switches to Document and jumps to that section.</p>
+          <p class="hint">Filter and export CSV for review. <strong>View</strong> jumps to that section in Document mode.</p>
           <div class="table-scroll req-table-wrap">
             <table class="req-table">
               <thead>
@@ -808,9 +946,10 @@ function renderReader() {
   }
 
   disconnectTocSpy();
-  app.innerHTML = `${header}${mainHtml}${renderNoteModal()}${statusBlock()}`;
+  app.innerHTML = `${header}${mainHtml}${renderNoteModal()}${renderManualModal()}${statusBlock()}`;
 
-  bindProjectBar(() => renderReader());
+  bindProjectBar(() => renderWithScrollPreserve(() => renderReader()));
+  bindManualUi(() => renderWithScrollPreserve(() => renderReader()));
 
   document.getElementById('btn-back')?.addEventListener('click', async () => {
     disconnectTocSpy();
@@ -822,6 +961,11 @@ function renderReader() {
     state.noteCounts = {};
     state.noteDraft = null;
     state.mediaStats = null;
+    state.notesFilter = '';
+    state.notesFilterType = 'all';
+    state.activeNoteId = null;
+    state.targetIndex = {};
+    state.manualOpen = false;
     await refreshLibrary();
     renderLibrary();
   });
@@ -840,8 +984,8 @@ function renderReader() {
       a.click();
       URL.revokeObjectURL(a.href);
       setStatus(
-        `Exported ${pack.filename}: ${pack.imageIncluded}/${pack.imageTotal} image(s) included` +
-          (pack.imageMissing.length ? ` (${pack.imageMissing.length} missing from IndexedDB)` : '')
+        `Exported ${pack.filename}: ${pack.imageIncluded}/${pack.imageTotal} figure(s) included` +
+          (pack.imageMissing.length ? ` (${pack.imageMissing.length} missing from library)` : '')
       );
     } catch (err) {
       setStatus(err.message || String(err), true);
@@ -954,7 +1098,26 @@ function renderReader() {
 function bindNotesUi() {
   document.getElementById('btn-toggle-notes')?.addEventListener('click', () => {
     state.notesPanelOpen = !state.notesPanelOpen;
-    renderReader();
+    renderWithScrollPreserve(() => renderReader());
+  });
+
+  let notesFilterTimer;
+  document.getElementById('notes-filter')?.addEventListener('input', (e) => {
+    clearTimeout(notesFilterTimer);
+    notesFilterTimer = setTimeout(() => {
+      state.notesFilter = e.target.value || '';
+      renderWithScrollPreserve(() => renderReader());
+      const again = document.getElementById('notes-filter');
+      if (again) {
+        again.focus();
+        again.setSelectionRange(again.value.length, again.value.length);
+      }
+    }, 140);
+  });
+
+  document.getElementById('notes-type-filter')?.addEventListener('change', (e) => {
+    state.notesFilterType = e.target.value || 'all';
+    renderWithScrollPreserve(() => renderReader());
   });
 
   document.getElementById('btn-notes-export')?.addEventListener('click', async () => {
@@ -971,7 +1134,7 @@ function bindNotesUi() {
       setStatus(`Exported ${payload.notes.length} note(s)`);
     } catch (err) {
       setStatus(err.message || String(err), true);
-      renderReader();
+      renderWithScrollPreserve(() => renderReader());
     }
   });
 
@@ -990,7 +1153,7 @@ function bindNotesUi() {
       const versionId = state.current?.versionId || state.current?.content?.criterion?.versionId;
       const choice = window.prompt(
         'Import mode for local notes:\n\n' +
-          'merge — keep existing notes; add/update from file (by id or same target)\n' +
+          'merge — keep existing notes; add/update from file\n' +
           'replace — delete this version’s notes, then import from file\n\n' +
           'Type merge or replace:',
         'merge'
@@ -1010,14 +1173,16 @@ function bindNotesUi() {
           (result.deleted ? `, removed ${result.deleted}` : '') +
           (result.updated ? ` (${result.updated} updated)` : '')
       );
-      renderReader();
+      renderWithScrollPreserve(() => renderReader());
     } catch (err) {
       setStatus(err.message || String(err), true);
-      renderReader();
+      renderWithScrollPreserve(() => renderReader());
     }
   });
 
   const openDraft = (targetType, targetId, existing) => {
+    const saved = captureScroll();
+    state._scrollPreserve = saved;
     state.noteDraft = {
       targetType,
       targetId,
@@ -1025,7 +1190,9 @@ function bindNotesUi() {
       body: existing?.body || '',
       createdAt: existing?.createdAt,
     };
+    if (existing?.id) state.activeNoteId = existing.id;
     renderReader();
+    restoreScroll(saved);
     requestAnimationFrame(() => document.getElementById('note-body')?.focus());
   };
 
@@ -1057,18 +1224,24 @@ function bindNotesUi() {
       e.stopPropagation();
       const id = btn.getAttribute('data-del-note');
       if (!confirm('Delete this local note?')) return;
+      const saved = captureScroll();
       await deleteNote(id);
+      if (state.activeNoteId === id) state.activeNoteId = null;
       await refreshNotes();
       setStatus('Note deleted');
       renderReader();
+      restoreScroll(saved);
     });
   });
 
   app.querySelectorAll('[data-jump-note]').forEach((el) => {
     if (el.tagName === 'LI') return;
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
       const type = el.getAttribute('data-jump-note');
       const id = el.getAttribute('data-jump-id');
+      const activate = el.getAttribute('data-activate-note');
+      if (activate) state.activeNoteId = activate;
       if (state.readerMode !== 'document') {
         state.readerMode = 'document';
         state._jumpTo = type === 'section' ? id : null;
@@ -1077,13 +1250,22 @@ function bindNotesUi() {
         return;
       }
       jumpToNoteTarget(type, id);
+      // Refresh active highlight without losing scroll much
+      app.querySelectorAll('.note-item').forEach((li) => {
+        li.classList.toggle('active', li.getAttribute('data-note-row') === state.activeNoteId);
+      });
     });
   });
 
-  document.getElementById('note-cancel')?.addEventListener('click', () => {
+  const closeDraft = () => {
+    const saved = state._scrollPreserve || captureScroll();
     state.noteDraft = null;
+    state._scrollPreserve = null;
     renderReader();
-  });
+    restoreScroll(saved);
+  };
+
+  document.getElementById('note-cancel')?.addEventListener('click', closeDraft);
 
   document.getElementById('note-save')?.addEventListener('click', async () => {
     const body = document.getElementById('note-body')?.value || '';
@@ -1091,7 +1273,8 @@ function bindNotesUi() {
     if (!d) return;
     try {
       const versionId = state.current?.versionId || state.current?.content?.criterion?.versionId;
-      await saveNote({
+      const savedScroll = state._scrollPreserve || captureScroll();
+      const record = await saveNote({
         id: d.noteId || undefined,
         versionId,
         targetType: d.targetType,
@@ -1100,21 +1283,38 @@ function bindNotesUi() {
         createdAt: d.createdAt,
       });
       state.noteDraft = null;
+      state._scrollPreserve = null;
+      state.activeNoteId = record.id;
+      state.notesPanelOpen = true;
       await refreshNotes();
-      setStatus('Note saved (local only)');
+      setStatus('Note saved');
       renderReader();
+      restoreScroll(savedScroll);
+      requestAnimationFrame(() => {
+        jumpToNoteTarget(record.targetType, record.targetId);
+        const row = app.querySelector(`[data-note-row="${CSS.escape(record.id)}"]`);
+        row?.scrollIntoView({ block: 'nearest' });
+      });
     } catch (err) {
       setStatus(err.message || String(err), true);
-      renderReader();
+      renderWithScrollPreserve(() => renderReader());
     }
   });
 
   document.getElementById('note-modal')?.addEventListener('click', (e) => {
-    if (e.target.id === 'note-modal') {
-      state.noteDraft = null;
-      renderReader();
-    }
+    if (e.target.id === 'note-modal') closeDraft();
   });
+
+  const onKey = (e) => {
+    if (e.key === 'Escape' && state.noteDraft) {
+      e.preventDefault();
+      document.removeEventListener('keydown', onKey);
+      closeDraft();
+    }
+  };
+  if (state.noteDraft) {
+    document.addEventListener('keydown', onKey);
+  }
 
   if (state._jumpSentence) {
     const sid = state._jumpSentence;
@@ -1130,7 +1330,10 @@ function bindNotesUi() {
 
 function jumpToNoteTarget(type, id) {
   if (type === 'section') {
-    document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const el = document.getElementById(`sec-${id}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el?.classList.add('note-flash');
+    setTimeout(() => el?.classList.remove('note-flash'), 1600);
   } else if (type === 'sentence') {
     const el = app.querySelector(`.sentence[data-sid="${CSS.escape(id)}"]`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1148,7 +1351,7 @@ async function boot() {
   try {
     await refreshLibrary();
   } catch (err) {
-    setStatus('IndexedDB error: ' + (err.message || err), true);
+    setStatus('Could not open local library: ' + (err.message || err), true);
   }
   renderLibrary();
 }

@@ -121,11 +121,13 @@ export function renderSentences(sentences, noteCounts = null, sectionId = '') {
       const sid = s.id || '';
       const t = (s.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const count = noteCounts ? noteCounts[`sentence:${sid}`] || 0 : 0;
-      const badge = count > 0 ? `<span class="note-badge" title="${count} note(s)">${count}</span>` : '';
+      const hasNote = count > 0;
+      const badge = hasNote ? `<span class="note-badge" title="${count} local note(s)">${count}</span>` : '';
       const afford = sid
-        ? `<button type="button" class="note-affordance" data-note-target="sentence" data-note-id="${escapeHtml(sid)}" data-section-id="${escapeHtml(sectionId)}" title="Add local note" aria-label="Annotate sentence">${badge || '✉'}</button>`
+        ? `<button type="button" class="note-affordance${hasNote ? ' has-note' : ''}" data-note-target="sentence" data-note-id="${escapeHtml(sid)}" data-section-id="${escapeHtml(sectionId)}" title="${hasNote ? 'View or edit local note' : 'Add local note'}" aria-label="${hasNote ? 'Edit note on sentence' : 'Annotate sentence'}">${badge || '✉'}</button>`
         : '';
-      return `<span class="sentence" data-sid="${escapeHtml(sid)}" data-section-id="${escapeHtml(sectionId)}">${t}${afford}</span>`;
+      const marked = hasNote ? ' has-local-note' : '';
+      return `<span class="sentence${marked}" data-sid="${escapeHtml(sid)}" data-section-id="${escapeHtml(sectionId)}">${t}${afford}</span>`;
     })
     .join(' ');
 }
@@ -203,12 +205,13 @@ function renderNode(node, noteCounts = null) {
 
   const secCount = noteCounts ? noteCounts[`section:${node.id}`] || 0 : 0;
   const secBadge = secCount > 0 ? ` <span class="note-badge">${secCount}</span>` : '';
+  const secHasNote = secCount > 0;
 
-  let html = `<section class="sec type-${(node.type || '').toLowerCase()}" id="sec-${node.id}" data-id="${node.id}">`;
+  let html = `<section class="sec type-${(node.type || '').toLowerCase()}${secHasNote ? ' has-local-note' : ''}" id="sec-${node.id}" data-id="${node.id}">`;
   if (showHeading) {
     html += `<div class="sec-heading-row">
       <h${headingLevel} class="sec-heading">${escapeHtml(title)}</h${headingLevel}>
-      <button type="button" class="note-btn" data-note-target="section" data-note-id="${escapeHtml(node.id)}" title="Local note for this section">Note${secBadge}</button>
+      <button type="button" class="note-btn${secHasNote ? ' has-note' : ''}" data-note-target="section" data-note-id="${escapeHtml(node.id)}" title="${secHasNote ? 'View or edit local note for this section' : 'Add local note for this section'}">${secHasNote ? 'Noted' : 'Note'}${secBadge}</button>
     </div>`;
   }
   if (node.sentences?.length) {
@@ -230,6 +233,43 @@ function renderNode(node, noteCounts = null) {
  */
 export function renderDocumentBody(sections, noteCounts = null) {
   return (sections || []).map((n) => renderNode(n, noteCounts)).join('');
+}
+
+/**
+ * Map note targets to human-readable ownership labels for the notes panel.
+ * Keys: "section:<id>" | "sentence:<id>"
+ */
+export function buildNoteTargetIndex(sections) {
+  const map = Object.create(null);
+
+  function walk(nodes, ancestors = []) {
+    for (const node of nodes || []) {
+      const title = sectionTitle(node);
+      const pathParts = [...ancestors];
+      if (title) pathParts.push(title);
+      const path = pathParts.filter(Boolean).join(' › ');
+      map[`section:${node.id}`] = {
+        kind: 'section',
+        title: title || 'Section',
+        path: path || title || 'Section',
+        preview: '',
+        sectionId: node.id,
+      };
+      for (const s of node.sentences || []) {
+        const text = (s.text || '').trim();
+        map[`sentence:${s.id}`] = {
+          kind: 'sentence',
+          title: pathParts.filter(Boolean).slice(-2).join(' › ') || title || 'Paragraph',
+          path: path || title || 'Paragraph',
+          preview: text.length > 140 ? `${text.slice(0, 140)}…` : text,
+          sectionId: node.id,
+        };
+      }
+      if (node.children?.length) walk(node.children, pathParts);
+    }
+  }
+  walk(sections);
+  return map;
 }
 
 /**
