@@ -642,14 +642,22 @@ code {
   position: relative;
   line-height: 1.35;
 }
+/* Continuous depth rail: one vertical guide; indent via padding only (no per-row border steps). */
+.toc > nav ul {
+  position: relative;
+  margin: 0 0 0 0.2rem;
+  padding: 0.1rem 0 0.1rem 0.7rem;
+  border-left: 2px solid #d8dee6;
+}
 .toc li a {
   display: block;
-  padding: 0.32rem 0.5rem 0.32rem 0.55rem;
+  padding: 0.32rem 0.55rem;
   border-radius: 6px;
   color: var(--ink);
   text-decoration: none;
-  border-left: 2px solid transparent;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  border-left: none;
+  margin-left: 0;
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
 }
 .toc li.toc-chapter > a {
   font-weight: 700;
@@ -666,10 +674,11 @@ code {
   font-size: 0.78rem;
   color: var(--muted);
 }
-.toc li.d1 > a { padding-left: 0.85rem; margin-left: 0.15rem; border-left-color: #e2e8f0; }
-.toc li.d2 > a { padding-left: 1.15rem; margin-left: 0.35rem; border-left-color: #e8edf3; }
-.toc li.d3 > a { padding-left: 1.45rem; margin-left: 0.55rem; border-left-color: #eef2f6; }
-.toc li.d4 > a { padding-left: 1.75rem; margin-left: 0.75rem; border-left-color: #f1f4f8; }
+.toc li.d0 > a { padding-left: 0.4rem; }
+.toc li.d1 > a { padding-left: 0.95rem; }
+.toc li.d2 > a { padding-left: 1.5rem; }
+.toc li.d3 > a { padding-left: 2.05rem; }
+.toc li.d4 > a { padding-left: 2.6rem; }
 .toc a:hover {
   background: var(--accent-soft);
   color: var(--accent);
@@ -683,8 +692,9 @@ code {
 .toc a.active {
   background: var(--accent-soft);
   color: var(--accent);
-  border-left-color: var(--accent);
   font-weight: 650;
+  /* Accent sits on the continuous rail without breaking it into steps */
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .toc .search-box {
   flex-shrink: 0;
