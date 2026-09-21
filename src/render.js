@@ -23,7 +23,7 @@ export function sectionTitle(node) {
   if (node.label) parts.push(node.label);
   if (node.heading) parts.push(node.heading);
   if (!parts.length && node.type) parts.push(node.type);
-  return parts.join(' — ') || 'Section';
+  return parts.join(': ') || 'Section';
 }
 
 /** Flatten tree for TOC */
