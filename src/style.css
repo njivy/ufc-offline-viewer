@@ -1252,14 +1252,15 @@ label.secondary-file {
 
 /* Workspaces (v0.9) */
 .workspace-bar .workspace-select {
-  flex: 0 1 12rem;
-  min-width: 9rem;
-  max-width: 18rem;
+  flex: 1 1 14rem;
+  min-width: 10rem;
+  max-width: 22rem;
   padding: 0.5rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: 8px;
   font: inherit;
   background: #fff;
+  color: var(--ink);
 }
 .workspace-bar .workspace-select:focus {
   outline: 2px solid color-mix(in srgb, var(--accent, #2f6fed) 45%, transparent);

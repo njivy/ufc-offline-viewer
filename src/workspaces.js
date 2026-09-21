@@ -1,6 +1,9 @@
 /**
  * Workspace switcher UI helpers (create / rename / switch / delete).
  * Storage APIs live in db.js; this module is presentation + wiring only.
+ *
+ * v0.9.1 UX: one select shows the current name; Rename/New/Delete are actions
+ * (no duplicate text field + no redundant “Active: Name” line).
  */
 
 import {
@@ -38,25 +41,22 @@ export function renderWorkspaceBar(opts = {}) {
         <select id="workspace-select" class="workspace-select" aria-label="Switch workspace">
           ${options || `<option value="${escapeHtml(activeId)}">${escapeHtml(name)}</option>`}
         </select>
-        <input
-          type="text"
-          id="workspace-name"
-          class="project-input"
-          placeholder="e.g. Hangar renovation — Base X"
-          value="${escapeHtml(name)}"
-          autocomplete="off"
-          spellcheck="true"
-          aria-label="Workspace / project name"
-        />
-        <button type="button" class="secondary" id="btn-rename-workspace" title="Save name for this workspace">Rename</button>
+        <button type="button" class="secondary" id="btn-rename-workspace" title="Rename this workspace">Rename</button>
         <button type="button" class="secondary" id="btn-new-workspace">New</button>
         <button type="button" class="secondary danger-quiet" id="btn-delete-workspace" title="Delete this workspace and its docs">Delete</button>
       </div>
-      <p class="project-current hint">
-        Active: <strong class="project-name">${escapeHtml(name)}</strong>
-        · docs, notes, and figures stay in this workspace
-      </p>
+      <p class="project-current hint">Docs, notes, and figures stay in this workspace.</p>
     </section>`;
+}
+
+/**
+ * Lightweight in-app prompt (non-blocking vs window.prompt when possible).
+ * Falls back to window.prompt if dialog API unavailable mid-render.
+ */
+function askName(title, initial) {
+  const next = window.prompt(title, initial ?? '');
+  if (next == null) return null;
+  return String(next).trim();
 }
 
 /**
@@ -78,17 +78,18 @@ export function bindWorkspaceBar(ctx) {
     await onChanged({ switched: true });
   });
 
-  const rename = async () => {
-    const input = document.getElementById('workspace-name');
-    const name = (input?.value || '').trim();
+  document.getElementById('btn-rename-workspace')?.addEventListener('click', async () => {
+    const id = getActiveWorkspaceId();
+    const state = getState();
+    const current = (state.workspaces || []).find((w) => w.id === id);
+    const name = askName('Rename workspace / project:', current?.name || '');
+    if (name == null) return;
     if (!name) {
       setStatus('Workspace name cannot be empty', true);
       return;
     }
     try {
-      const id = getActiveWorkspaceId();
       const updated = await renameWorkspace(id, name);
-      const state = getState();
       state.workspaces = await listWorkspaces();
       state.activeWorkspaceId = id;
       state.applicableProject = updated.name;
@@ -98,26 +99,17 @@ export function bindWorkspaceBar(ctx) {
       setStatus(err.message || String(err), true);
       await onChanged({ error: true });
     }
-  };
-
-  document.getElementById('btn-rename-workspace')?.addEventListener('click', rename);
-  document.getElementById('workspace-name')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      rename();
-    }
   });
 
   document.getElementById('btn-new-workspace')?.addEventListener('click', async () => {
-    const name = window.prompt('Name for the new workspace / project:', '');
+    const name = askName('Name for the new workspace / project:', '');
     if (name == null) return;
-    const trimmed = String(name).trim();
-    if (!trimmed) {
+    if (!name) {
       setStatus('Workspace name cannot be empty', true);
       return;
     }
     try {
-      const ws = await createWorkspace(trimmed);
+      const ws = await createWorkspace(name);
       setActiveWorkspaceId(ws.id);
       const state = getState();
       state.workspaces = await listWorkspaces();

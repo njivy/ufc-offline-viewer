@@ -48,7 +48,7 @@ export function renderUserManualHtml() {
         <p>Each <strong>workspace</strong> is an isolated job or project: its own library of UFC documents, local notes, and figures. Use the <strong>Workspace / project</strong> bar on the library and reader screens to:</p>
         <ul>
           <li><strong>Switch</strong> among workspaces (library reloads; the reader closes if the open doc is not in the new workspace).</li>
-          <li><strong>Rename</strong> the active workspace — the name <em>is</em> your applicable project title.</li>
+          <li><strong>Rename</strong> — change the active workspace name (it <em>is</em> your applicable project title). The switcher list shows the current name once.</li>
           <li><strong>New</strong> — create an empty workspace for another job.</li>
           <li><strong>Delete</strong> — remove a workspace and all of its docs, notes, and media (you cannot delete the last remaining workspace).</li>
         </ul>
