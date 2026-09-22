@@ -7,6 +7,7 @@ Static browser app for **offline reading** of Unified Facilities Criteria (UFC) 
 - **Import (primary):** `.json` or `.zip` (content + optional figures) → stored on this device → fully offline read.
 - **No live API fetch:** Content and images come only from local import / media packs / bundled samples (see Technical notes in the in-app **User manual**).
 - **Writes:** “Open on live site” only. Formal CCR stays on digital.wbdg.org — see [docs/CCR-PLAN.md](./docs/CCR-PLAN.md). Local notes never sync.
+- **Offline proposal editing:** Use the sibling [Offline UFC Editor](https://github.com/njivy/ufc-offline-editor) for CMS checkout packs, section-locked tracked changes, rationales, and proposal-pack export. Editor proposals are not published authority.
 - **Workspaces (v0.9):** Per-job isolation — each workspace has its own docs, notes, and media. Switcher: create / rename / switch / delete. Workspace name replaces Applicable project.
 - **v0.8:** Quieter main chrome, in-app **User manual**, and first-class local commentary UX (ownership labels, filter, jump, scroll-preserving edit).
 
